@@ -1,6 +1,6 @@
 # FreightHero Watchtower — Implementation Backlog
 
-Kickoff backlog derived from [dos/research/implementation-spec.md](../dos/research/implementation-spec.md).
+Kickoff backlog derived from [implementation-spec.md](research/implementation-spec.md).
 
 ## Phase 1 — Repos and IaC (start here)
 

@@ -90,5 +90,5 @@ docs/BACKLOG.md   Implementation phases
 ## Docs
 
 - [Implementation backlog](docs/BACKLOG.md)
-- [Implementation spec](dos/research/implementation-spec.md)
+- [Implementation spec](docs/research/implementation-spec.md)
 - [Agent guide](AGENTS.md)

@@ -13,10 +13,10 @@ Take-home implementation of **FreightHero AI Watchtower**: a production-shaped a
 | Document | Role |
 | --- | --- |
 | [challenge-specs/README.md](challenge-specs/README.md) | Challenge requirements, API contract, rubric |
-| [dos/research/implementation-spec.md](dos/research/implementation-spec.md) | **Single source of truth** for architecture and build details |
+| [docs/research/implementation-spec.md](docs/research/implementation-spec.md) | **Single source of truth** for architecture and build details |
 | [docs/BACKLOG.md](docs/BACKLOG.md) | Phased implementation checklist (what to build next) |
-| [dos/research/use-temporal.md](dos/research/use-temporal.md) | Why Temporal replaced the initial pgmq/Supabase plan |
-| [dos/research/initial-plan.md](dos/research/initial-plan.md) | Superseded plan (historical reference only) |
+| [docs/research/use-temporal.md](docs/research/use-temporal.md) | Why Temporal replaced the initial pgmq/Supabase plan |
+| [docs/research/initial-plan.md](docs/research/initial-plan.md) | Superseded plan (historical reference only) |
 
 Challenge assets: `challenge-specs/assets/` (SOPs, schemas, fixtures, tools, customer expectations).
 
@@ -52,7 +52,7 @@ Challenge assets: `challenge-specs/assets/` (SOPs, schemas, fixtures, tools, cus
 app/               # FastAPI, worker, workflows, activities, tools (stubs)
 evals/             # Eval harness stubs
 infra/             # Terraform
-docs/              # BACKLOG.md
+docs/              # BACKLOG.md, research notes, architecture docs
 challenge-specs/   # Read-only challenge inputs
 ```
 
@@ -63,12 +63,12 @@ challenge-specs/   # Read-only challenge inputs
 Before implementing **any phase** in [docs/BACKLOG.md](docs/BACKLOG.md) (Phase 2, 3, …):
 
 1. Apply the **grill-me** skill (`.cursor/skills/grill-me/SKILL.md`) or invoke `/grill-me`.
-2. Stress-test that phase’s scope against [implementation-spec.md](dos/research/implementation-spec.md) and challenge requirements.
+2. Stress-test that phase’s scope against [implementation-spec.md](docs/research/implementation-spec.md) and challenge requirements.
 
 ### 2. While implementing
 
 - Follow [docs/BACKLOG.md](docs/BACKLOG.md) in order unless the user redirects.
-- Match conventions in [implementation-spec.md](dos/research/implementation-spec.md).
+- Match conventions in [implementation-spec.md](docs/research/implementation-spec.md).
 - Use MCP when helpful: Temporal docs (`temporal-docs`), Terraform registry/plan (`terraform`).
 - Minimize scope; avoid unrelated changes.
 - Do not commit unless the user asks.
