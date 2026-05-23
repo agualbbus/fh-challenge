@@ -1,0 +1,252 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://freighthero.ai/schemas/ai-engineer-challenge-input.schema.json",
+  "title": "AI Engineer Challenge Input",
+  "oneOf": [
+    { "$ref": "#/$defs/load_seed_request" },
+    { "$ref": "#/$defs/submit_task_request" },
+    { "$ref": "#/$defs/inbound_communication_event" },
+    { "$ref": "#/$defs/tracking_event" },
+    { "$ref": "#/$defs/load_update_event" }
+  ],
+  "$defs": {
+    "load_seed_request": {
+      "type": "object",
+      "required": ["load_id", "customer_id", "load_data"],
+      "additionalProperties": false,
+      "properties": {
+        "load_id": { "type": "string", "minLength": 1 },
+        "customer_id": { "$ref": "#/$defs/customer_id" },
+        "load_data": { "$ref": "#/$defs/load_data" },
+        "initial_state": { "$ref": "#/$defs/load_state" }
+      }
+    },
+    "submit_task_request": {
+      "type": "object",
+      "required": ["task_uuid", "load_id", "customer_id", "task_instruction_type", "requested_at"],
+      "additionalProperties": false,
+      "properties": {
+        "task_uuid": { "type": "string", "minLength": 1 },
+        "load_id": { "type": "string", "minLength": 1 },
+        "customer_id": { "$ref": "#/$defs/customer_id" },
+        "task_instruction_type": {
+          "enum": ["delivery_eta_checkpoint", "confirm_delivery"]
+        },
+        "requested_at": { "type": "string", "format": "date-time" },
+        "source": { "enum": ["api", "operator", "system"] },
+        "payload": { "type": "object" }
+      }
+    },
+    "inbound_communication_event": {
+      "type": "object",
+      "required": ["event_id", "event_type", "load_id", "customer_id", "occurred_at", "inbound_communication"],
+      "additionalProperties": false,
+      "properties": {
+        "event_id": { "type": "string", "minLength": 1 },
+        "event_type": { "const": "inbound_communication" },
+        "load_id": { "type": "string", "minLength": 1 },
+        "customer_id": { "$ref": "#/$defs/customer_id" },
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "inbound_communication": { "$ref": "#/$defs/inbound_communication" }
+      }
+    },
+    "tracking_event": {
+      "type": "object",
+      "required": ["event_id", "event_type", "load_id", "customer_id", "occurred_at", "tracking"],
+      "additionalProperties": false,
+      "properties": {
+        "event_id": { "type": "string", "minLength": 1 },
+        "event_type": { "const": "tracking" },
+        "load_id": { "type": "string", "minLength": 1 },
+        "customer_id": { "$ref": "#/$defs/customer_id" },
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "tracking": { "$ref": "#/$defs/tracking_ping" }
+      }
+    },
+    "load_update_event": {
+      "type": "object",
+      "required": ["event_id", "event_type", "load_id", "customer_id", "occurred_at", "load_update"],
+      "additionalProperties": false,
+      "properties": {
+        "event_id": { "type": "string", "minLength": 1 },
+        "event_type": { "const": "load_update" },
+        "load_id": { "type": "string", "minLength": 1 },
+        "customer_id": { "$ref": "#/$defs/customer_id" },
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "load_update": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "milestone_state": { "$ref": "#/$defs/load_state" },
+            "load_data_patch": { "type": "object" },
+            "reason": { "type": "string" }
+          }
+        }
+      }
+    },
+    "customer_id": {
+      "type": "string",
+      "enum": ["customer_a", "customer_b", "customer_c"]
+    },
+    "load_state": {
+      "type": "string",
+      "enum": ["on_route_to_delivery", "at_delivery", "delivered", "pod_collected"]
+    },
+    "load_data": {
+      "type": "object",
+      "required": ["external_load_id", "companies", "contacts", "stops"],
+      "additionalProperties": true,
+      "properties": {
+        "external_load_id": { "type": "string" },
+        "po_number": { "type": "string" },
+        "instructions": { "type": "string" },
+        "companies": {
+          "type": "object",
+          "required": ["broker", "shipper", "carrier"],
+          "additionalProperties": false,
+          "properties": {
+            "broker": { "$ref": "#/$defs/company" },
+            "shipper": { "$ref": "#/$defs/company" },
+            "carrier": { "$ref": "#/$defs/company" }
+          }
+        },
+        "contacts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "driver": { "$ref": "#/$defs/person_contact" },
+            "dispatcher": { "$ref": "#/$defs/person_contact" },
+            "broker": { "$ref": "#/$defs/person_contact" }
+          }
+        },
+        "stops": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/stop" }
+        }
+      }
+    },
+    "company": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "uuid": { "type": "string" }
+      }
+    },
+    "person_contact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "first_name": { "type": "string" },
+        "last_name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "uuid": { "type": "string" }
+      }
+    },
+    "stop": {
+      "type": "object",
+      "required": ["stop_id", "type", "address", "appointment", "coordinates"],
+      "additionalProperties": false,
+      "properties": {
+        "stop_id": { "type": "string" },
+        "type": { "enum": ["pickup", "delivery"] },
+        "status": { "type": "string" },
+        "address": { "$ref": "#/$defs/address" },
+        "appointment": { "$ref": "#/$defs/appointment" },
+        "coordinates": { "$ref": "#/$defs/coordinates" },
+        "reference_numbers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "address": {
+      "type": "object",
+      "required": ["line_1", "city", "state", "postal_code", "country"],
+      "additionalProperties": false,
+      "properties": {
+        "line_1": { "type": "string" },
+        "line_2": { "type": ["string", "null"] },
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "postal_code": { "type": "string" },
+        "country": { "type": "string" }
+      }
+    },
+    "appointment": {
+      "type": "object",
+      "required": ["type", "timezone"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["fixed", "window", "fcfs"] },
+        "start_utc": { "type": "string", "format": "date-time" },
+        "end_utc": { "type": "string", "format": "date-time" },
+        "timezone": { "type": "string" }
+      }
+    },
+    "coordinates": {
+      "type": "object",
+      "required": ["lat", "lng"],
+      "additionalProperties": false,
+      "properties": {
+        "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+        "lng": { "type": "number", "minimum": -180, "maximum": 180 }
+      }
+    },
+    "inbound_communication": {
+      "type": "object",
+      "required": ["channel", "sender_type", "content", "attachments"],
+      "additionalProperties": false,
+      "properties": {
+        "channel": { "enum": ["sms", "email"] },
+        "sender_type": { "enum": ["driver", "dispatcher", "carrier", "broker", "shipper", "hero", "tool", "other"] },
+        "sender_name": { "type": "string" },
+        "content": { "type": "string" },
+        "attachments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/attachment" }
+        }
+      }
+    },
+    "attachment": {
+      "type": "object",
+      "required": ["attachment_id", "file_name", "mock_classification"],
+      "additionalProperties": false,
+      "properties": {
+        "attachment_id": { "type": "string" },
+        "file_name": { "type": "string" },
+        "mime_type": { "type": "string" },
+        "mock_classification": {
+          "type": "object",
+          "required": ["categories"],
+          "additionalProperties": false,
+          "properties": {
+            "categories": {
+              "type": "array",
+              "items": {
+                "enum": ["document_pod", "lumper_receipt", "photo_unloaded", "other_document", "unreadable"]
+              }
+            },
+            "description": { "type": "string" }
+          }
+        }
+      }
+    },
+    "tracking_ping": {
+      "type": "object",
+      "required": ["tracking_id", "lat", "lng", "distance_to_delivery_miles", "ping_sequence"],
+      "additionalProperties": false,
+      "properties": {
+        "tracking_id": { "type": "string" },
+        "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+        "lng": { "type": "number", "minimum": -180, "maximum": 180 },
+        "distance_to_delivery_miles": { "type": "number", "minimum": 0 },
+        "ping_sequence": { "type": "integer", "minimum": 1 },
+        "provider": { "type": "string" }
+      }
+    }
+  }
+}

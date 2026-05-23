@@ -1,0 +1,6 @@
+project_name            = "freight-watchtower"
+aws_region              = "us-east-1"
+temporal_namespace_name = "freight-watchtower-dev"
+temporal_retention_days = 14
+# temporal_account_id   = ""  # optional pin — matches TEMPORAL_CLOUD_ALLOWED_ACCOUNT_ID
+enable_aws_resources    = true

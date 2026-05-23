@@ -1,0 +1,346 @@
+{
+  "version": "1.0",
+  "description": "Visible challenge scenarios. Hidden tests may vary customer behavior, channel, timing, attachments, and event order.",
+  "base_load": {
+    "load_id": "load-visible-001",
+    "customer_id": "customer_a",
+    "initial_state": "on_route_to_delivery",
+    "load_data": {
+      "external_load_id": "FH-2026-001",
+      "po_number": "PO-7788",
+      "instructions": "Receiver requires check-in at guard shack. Follow BOL temperature instructions.",
+      "companies": {
+        "broker": { "name": "Example Broker", "uuid": "broker-example" },
+        "shipper": { "name": "Example Shipper", "uuid": "shipper-example" },
+        "carrier": { "name": "Example Carrier", "uuid": "carrier-example" }
+      },
+      "contacts": {
+        "driver": {
+          "first_name": "Sam",
+          "last_name": "Driver",
+          "phone": "+15555550100",
+          "uuid": "driver-sam"
+        },
+        "dispatcher": {
+          "first_name": "Dana",
+          "last_name": "Dispatch",
+          "email": "dispatch@example.com",
+          "uuid": "dispatcher-dana"
+        },
+        "broker": {
+          "first_name": "Blake",
+          "last_name": "Broker",
+          "email": "broker@example.com",
+          "uuid": "broker-contact"
+        }
+      },
+      "stops": [
+        {
+          "stop_id": "pickup-1",
+          "type": "pickup",
+          "status": "departed",
+          "address": {
+            "line_1": "123 Pickup Ave",
+            "line_2": null,
+            "city": "Chicago",
+            "state": "IL",
+            "postal_code": "60601",
+            "country": "US"
+          },
+          "appointment": {
+            "type": "fixed",
+            "start_utc": "2026-05-10T14:00:00Z",
+            "timezone": "America/Chicago"
+          },
+          "coordinates": { "lat": 41.8781, "lng": -87.6298 },
+          "reference_numbers": { "pickup": "PU-123" }
+        },
+        {
+          "stop_id": "delivery-1",
+          "type": "delivery",
+          "status": "en_route",
+          "address": {
+            "line_1": "456 Delivery St",
+            "line_2": "Dock 4",
+            "city": "Dallas",
+            "state": "TX",
+            "postal_code": "75201",
+            "country": "US"
+          },
+          "appointment": {
+            "type": "fixed",
+            "start_utc": "2026-05-11T20:00:00Z",
+            "timezone": "America/Chicago"
+          },
+          "coordinates": { "lat": 32.7767, "lng": -96.7970 },
+          "reference_numbers": { "delivery": "DEL-456", "receiver_phone": "+15555550200" }
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "id": "3b_load_question_found",
+      "title": "Driver asks for delivery address and info is available",
+      "customer_id": "customer_a",
+      "initial_state": "on_route_to_delivery",
+      "events": [
+        {
+          "event_id": "evt-3b",
+          "event_type": "inbound_communication",
+          "load_id": "load-visible-001",
+          "customer_id": "customer_a",
+          "occurred_at": "2026-05-11T17:05:00Z",
+          "inbound_communication": {
+            "channel": "sms",
+            "sender_type": "driver",
+            "sender_name": "Sam Driver",
+            "content": "What's the delivery address?",
+            "attachments": []
+          }
+        }
+      ],
+      "expected": {
+        "required_tool_calls": [
+          { "tool": "send_sms", "contains": "456 Delivery St" }
+        ],
+        "forbidden_tool_calls": ["create_task", "create_issue", "send_email", "forward_email", "send_slack_message"],
+        "expected_state": "on_route_to_delivery"
+      }
+    },
+    {
+      "id": "3c_load_question_missing",
+      "title": "Driver asks for missing load information",
+      "customer_id": "customer_b",
+      "initial_state": "on_route_to_delivery",
+      "load_data_patch": {
+        "stops[1].reference_numbers.receiver_phone": null
+      },
+      "events": [
+        {
+          "event_id": "evt-3c",
+          "event_type": "inbound_communication",
+          "load_id": "load-visible-001",
+          "customer_id": "customer_b",
+          "occurred_at": "2026-05-11T17:10:00Z",
+          "inbound_communication": {
+            "channel": "sms",
+            "sender_type": "driver",
+            "sender_name": "Sam Driver",
+            "content": "Can you send receiver phone number?",
+            "attachments": []
+          }
+        }
+      ],
+      "expected": {
+        "required_tool_calls": [
+          { "tool": "send_sms", "contains": "checking" },
+          { "tool": "create_task", "arguments": { "task_type": "missing_load_info" } },
+          { "tool": "send_slack_message", "arguments": { "audience": "broker" } }
+        ],
+        "forbidden_tool_calls": ["create_issue", "update_load_state"],
+        "expected_state": "on_route_to_delivery"
+      }
+    },
+    {
+      "id": "3d_truck_broken",
+      "title": "Driver reports truck breakdown",
+      "customer_id": "customer_a",
+      "initial_state": "on_route_to_delivery",
+      "events": [
+        {
+          "event_id": "evt-3d",
+          "event_type": "inbound_communication",
+          "load_id": "load-visible-001",
+          "customer_id": "customer_a",
+          "occurred_at": "2026-05-11T17:15:00Z",
+          "inbound_communication": {
+            "channel": "sms",
+            "sender_type": "driver",
+            "sender_name": "Sam Driver",
+            "content": "Truck broke down, waiting on roadside repair.",
+            "attachments": []
+          }
+        }
+      ],
+      "expected": {
+        "required_tool_calls": [
+          { "tool": "create_issue", "arguments": { "issue_type": "equipment_failure" } },
+          { "tool": "send_sms", "contains": "review" }
+        ],
+        "forbidden_tool_calls": ["create_task", "update_eta", "update_load_state"],
+        "expected_state": "on_route_to_delivery"
+      }
+    },
+    {
+      "id": "3f_driver_provides_eta",
+      "title": "Driver provides valid ETA",
+      "customer_id": "customer_c",
+      "initial_state": "on_route_to_delivery",
+      "events": [
+        {
+          "event_id": "evt-3f",
+          "event_type": "inbound_communication",
+          "load_id": "load-visible-001",
+          "customer_id": "customer_c",
+          "occurred_at": "2026-05-11T17:25:00Z",
+          "inbound_communication": {
+            "channel": "sms",
+            "sender_type": "driver",
+            "sender_name": "Sam Driver",
+            "content": "ETA delivery 2:30pm central.",
+            "attachments": []
+          }
+        }
+      ],
+      "expected": {
+        "required_tool_calls": [
+          { "tool": "update_eta", "arguments": { "target_location": "delivery" } },
+          { "tool": "send_sms", "contains": "updated" },
+          { "tool": "create_timer", "arguments": { "timer_type": "eta_followup" } }
+        ],
+        "forbidden_tool_calls": ["create_issue", "create_task", "update_load_state"],
+        "expected_state": "on_route_to_delivery"
+      }
+    },
+    {
+      "id": "3h_fresh_tracking_three_pings_in_geofence",
+      "title": "Fresh tracking has 3 consecutive pings inside delivery geofence",
+      "customer_id": "customer_b",
+      "initial_state": "on_route_to_delivery",
+      "events": [
+        {
+          "event_id": "evt-3h-1",
+          "event_type": "tracking",
+          "load_id": "load-visible-001",
+          "customer_id": "customer_b",
+          "occurred_at": "2026-05-11T17:30:00Z",
+          "tracking": { "tracking_id": "trk-1", "lat": 32.777, "lng": -96.797, "distance_to_delivery_miles": 0.2, "ping_sequence": 1, "provider": "mock" }
+        },
+        {
+          "event_id": "evt-3h-2",
+          "event_type": "tracking",
+          "load_id": "load-visible-001",
+          "customer_id": "customer_b",
+          "occurred_at": "2026-05-11T17:35:00Z",
+          "tracking": { "tracking_id": "trk-2", "lat": 32.7769, "lng": -96.7971, "distance_to_delivery_miles": 0.1, "ping_sequence": 2, "provider": "mock" }
+        },
+        {
+          "event_id": "evt-3h-3",
+          "event_type": "tracking",
+          "load_id": "load-visible-001",
+          "customer_id": "customer_b",
+          "occurred_at": "2026-05-11T17:40:00Z",
+          "tracking": { "tracking_id": "trk-3", "lat": 32.7768, "lng": -96.7972, "distance_to_delivery_miles": 0.1, "ping_sequence": 3, "provider": "mock" }
+        }
+      ],
+      "expected": {
+        "required_tool_calls": [
+          { "tool": "update_load_state", "arguments": { "target_state": "at_delivery" } },
+          { "tool": "cancel_timers" }
+        ],
+        "forbidden_tool_calls": ["create_issue", "create_task", "update_eta"],
+        "expected_state": "at_delivery"
+      }
+    },
+    {
+      "id": "3i_not_tracking_driver_says_arrived",
+      "title": "Driver is not tracking and says arrived",
+      "customer_id": "customer_a",
+      "initial_state": "on_route_to_delivery",
+      "events": [
+        {
+          "event_id": "evt-3i",
+          "event_type": "inbound_communication",
+          "load_id": "load-visible-001",
+          "customer_id": "customer_a",
+          "occurred_at": "2026-05-11T17:45:00Z",
+          "inbound_communication": {
+            "channel": "sms",
+            "sender_type": "driver",
+            "sender_name": "Sam Driver",
+            "content": "Arrived at receiver.",
+            "attachments": []
+          }
+        }
+      ],
+      "expected": {
+        "required_tool_calls": [
+          { "tool": "update_load_state", "arguments": { "target_state": "at_delivery" } },
+          { "tool": "send_sms", "contains": "POD" },
+          { "tool": "cancel_timers" }
+        ],
+        "forbidden_tool_calls": ["create_issue", "create_task", "update_eta"],
+        "expected_state": "at_delivery"
+      }
+    },
+    {
+      "id": "3j_not_tracking_driver_sends_pod",
+      "title": "Driver is not tracking and sends POD",
+      "customer_id": "customer_c",
+      "initial_state": "on_route_to_delivery",
+      "events": [
+        {
+          "event_id": "evt-3j",
+          "event_type": "inbound_communication",
+          "load_id": "load-visible-001",
+          "customer_id": "customer_c",
+          "occurred_at": "2026-05-11T17:50:00Z",
+          "inbound_communication": {
+            "channel": "sms",
+            "sender_type": "driver",
+            "sender_name": "Sam Driver",
+            "content": "POD attached",
+            "attachments": [
+              {
+                "attachment_id": "att-pod-3j",
+                "file_name": "pod.jpg",
+                "mime_type": "image/jpeg",
+                "mock_classification": {
+                  "categories": ["document_pod"],
+                  "description": "Signed proof of delivery"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "required_tool_calls": [
+          { "tool": "check_attachment", "arguments": { "attachment_id": "att-pod-3j" } },
+          { "tool": "update_load_state", "arguments": { "target_state": "pod_collected" } },
+          { "tool": "send_sms", "contains": "Thank" }
+        ],
+        "forbidden_tool_calls": ["create_issue", "update_eta"],
+        "expected_state": "pod_collected"
+      }
+    },
+    {
+      "id": "3k_broker_email_ignore",
+      "title": "Broker sends email that should be ignored",
+      "customer_id": "customer_a",
+      "initial_state": "on_route_to_delivery",
+      "events": [
+        {
+          "event_id": "evt-3k",
+          "event_type": "inbound_communication",
+          "load_id": "load-visible-001",
+          "customer_id": "customer_a",
+          "occurred_at": "2026-05-11T17:55:00Z",
+          "inbound_communication": {
+            "channel": "email",
+            "sender_type": "broker",
+            "sender_name": "Blake Broker",
+            "content": "Can carrier take $200 less on this one?",
+            "attachments": []
+          }
+        }
+      ],
+      "expected": {
+        "required_tool_calls": [],
+        "forbidden_tool_calls": ["send_sms", "send_email", "forward_email", "send_slack_message", "create_task", "create_issue", "update_eta", "update_load_state"],
+        "expected_state": "on_route_to_delivery"
+      }
+    }
+  ]
+}
