@@ -8,11 +8,11 @@ Kickoff backlog derived from [implementation-spec.md](research/implementation-sp
 - [x] Python via **uv**: `uv python pin 3.12`, `uv init`, `uv add fastapi uvicorn temporalio pydantic langfuse pytest pytest-asyncio`, commit `uv.lock`
 - [x] Add Makefile targets: `install`, `dev-api`, `dev-worker`, `test`, `eval` (all via `uv run`)
 - [x] Add `Dockerfile` (uv-based install from `uv.lock`) and `docker-compose.yml` (api, worker; Temporal dev for persistence)
-- [x] Add `.env.example` for Temporal, DB, model keys, and Langfuse (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`, `LANGFUSE_ENABLED`)
+- [x] Add `.env.example` for Temporal, model keys, and Langfuse (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`, `LANGFUSE_ENABLED`) — no app database (compose Postgres is for Temporal only)
 - [x] Implement `GET /health` on FastAPI stub
 - [x] Implement `app/worker.py` registering stub `LoadWorkflow`
-- [ ] Sign up Temporal Cloud; create namespace with API key auth (`terraform apply` — manual, see `infra/README.md`)
-- [x] Add `infra/temporal.tf` + `infra/aws_ecs.tf` skeleton (ECR, ECS cluster, two services, ALB, Secrets)
+- [x] Temporal Cloud namespace via `terraform apply` (see `infra/README.md`); put namespace API key in `.env` as `TEMPORAL_API_KEY` for Cloud worker/API
+- [x] Add `infra/temporal.tf` + `infra/aws_ecs.tf` skeleton (ECR, ECS cluster, ALB, Secrets Manager — **no** ECS task definitions or services yet; deploy phase)
 - [x] Document local run in root `README.md`
 
 ## Phase 2 — Agent harness
@@ -24,7 +24,7 @@ Kickoff backlog derived from [implementation-spec.md](research/implementation-sp
 - [ ] `evals/run_evals.py` + `evals/assertions.py`
 - [ ] `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`
 - [ ] `.cursor/rules/` for determinism, customer config, broker ignore, eval discipline
-- [ ] Model fallback chain (`MODEL_MODE=mock` for CI)
+- [ ] OpenRouter client + model fallback (`OPENROUTER_API_KEY`, primary/fallback model ids; `MODEL_MODE=mock` for CI — see implementation-spec §2.9, §4.7)
 - [ ] Langfuse: `app/observability/langfuse.py`, OTel exporter, `@observe` on `run_agent_activity` ([Temporal + Langfuse](https://langfuse.com/integrations/frameworks/temporal))
 - [ ] Verify one trace in Langfuse UI after `3b` manual run; save trace URL to `docs/evidence/`
 

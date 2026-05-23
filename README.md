@@ -11,19 +11,23 @@ Production-shaped take-home: SOP-driven freight agents on **Temporal Cloud**, Fa
 
 ## Quick start (local)
 
+Local Temporal uses **Docker Compose** (`temporalio/auto-setup`), not `temporal server start-dev`.
+
 ```bash
 uv sync
-make test
+make test          # or: uv run pytest
 ```
 
 **API + worker on host** (requires Temporal at `localhost:7233`):
 
 ```bash
 docker compose up postgresql temporal temporal-ui -d
-make dev-api    # terminal 1
-make dev-worker # terminal 2
+make dev-api       # terminal 1 — or: uv run uvicorn app.api.main:app --reload --port 8000
+make dev-worker    # terminal 2 — or: uv run python -m app.worker
 curl http://localhost:8000/health
 ```
+
+On Windows, `make` is optional if `uv` is on your PATH (install [GnuWin32 Make](http://gnuwin32.sourceforge.net/packages/make.htm) or use the `uv run` commands above).
 
 **Full stack in Docker:**
 
@@ -37,6 +41,8 @@ curl http://localhost:8000/health
 - Task queue: `freight-watchtower`
 
 Copy [`.env.example`](.env.example) to `.env` for overrides (optional for local compose; required for Temporal Cloud).
+
+Live agent runs use **[OpenRouter](https://openrouter.ai/)** as the LLM provider (`OPENROUTER_API_KEY`, OpenAI-compatible API). CI/evals use `MODEL_MODE=mock` without an API key — see [implementation-spec §2.9](docs/research/implementation-spec.md#29-llm-provider--openrouter).
 
 ## Configuration
 

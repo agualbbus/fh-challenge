@@ -15,8 +15,7 @@ Take-home implementation of **FreightHero AI Watchtower**: a production-shaped a
 | [challenge-specs/README.md](challenge-specs/README.md) | Challenge requirements, API contract, rubric |
 | [docs/research/implementation-spec.md](docs/research/implementation-spec.md) | **Single source of truth** for architecture and build details |
 | [docs/BACKLOG.md](docs/BACKLOG.md) | Phased implementation checklist (what to build next) |
-| [docs/research/use-temporal.md](docs/research/use-temporal.md) | Why Temporal replaced the initial pgmq/Supabase plan |
-| [docs/research/initial-plan.md](docs/research/initial-plan.md) | Superseded plan (historical reference only) |
+| [docs/research/use-temporal.md](docs/research/use-temporal.md) | Temporal Cloud deployment and SDK notes (optional deep dive) |
 
 Challenge assets: `challenge-specs/assets/` (SOPs, schemas, fixtures, tools, customer expectations).
 
@@ -28,12 +27,11 @@ Challenge assets: `challenge-specs/assets/` (SOPs, schemas, fixtures, tools, cus
 | Packaging | [uv](https://docs.astral.sh/uv/) (`uv.lock`, `uv run`) |
 | Durable async / per-load isolation | **Temporal Cloud** (`workflow_id = load-{load_id}`) |
 | Agent runtime | LLM + SOP/customer config inside Temporal activities |
+| LLM provider | **OpenRouter** (OpenAI-compatible API; `openai` SDK + `OPENROUTER_API_KEY`) — Phase 2 |
 | AI tracing | **Langfuse** (OTel + `@observe` on activities) — Phase 2+ |
 | Compute | AWS ECS Fargate (API + Worker from one image) |
 | IaC | Terraform (`infra/`) — Temporal Cloud + AWS |
 | Local dev | `docker-compose`, Makefile targets |
-
-**Superseded:** initial-plan’s Supabase + pgmq + Railway stack. Do not reintroduce without an explicit decision.
 
 ## Conventions (Phase 1)
 
@@ -44,7 +42,8 @@ Challenge assets: `challenge-specs/assets/` (SOPs, schemas, fixtures, tools, cus
 | Run API | `make dev-api` or `uv run uvicorn app.api.main:app --reload --port 8000` |
 | Run worker | `make dev-worker` or `uv run python -m app.worker` |
 | Tests | `make test`; `pythonpath = ["."]` in `pyproject.toml` |
-| Local Temporal | compose: `temporal:7233`, namespace `default`, no API key |
+| Local Temporal | `docker compose` → `temporalio/auto-setup` on `:7233`, namespace `default`, no API key (not `temporal server start-dev`) |
+| Windows / no `make` | Same targets via `uv run` (see README) |
 
 ## Repository layout
 
@@ -62,7 +61,7 @@ challenge-specs/   # Read-only challenge inputs
 
 Before implementing **any phase** in [docs/BACKLOG.md](docs/BACKLOG.md) (Phase 2, 3, …):
 
-1. Apply the **grill-me** skill (`.cursor/skills/grill-me/SKILL.md`) or invoke `/grill-me`.
+1. Apply the **grill-me** skill ([`.agents/skills/grill-me/SKILL.md`](.agents/skills/grill-me/SKILL.md)) or invoke `/grill-me`.
 2. Stress-test that phase’s scope against [implementation-spec.md](docs/research/implementation-spec.md) and challenge requirements.
 
 ### 2. While implementing
@@ -108,4 +107,4 @@ After meaningful progress, update **Current state**, **Conventions**, and **Gotc
 
 ---
 
-*Last updated: Phase 1 complete; Terraform Temporal + AWS skeleton applied; Secrets Manager docs added.*
+*Last updated: OpenRouter as LLM provider (docs); Phase 1 complete.*

@@ -1,6 +1,6 @@
 # FreightHero Watchtower — Implementation Spec
 
-Consolidated build plan for the [AI Engineer Technical Challenge](../../challenge-specs/README.md). This document is the single source of truth for execution. It merges decisions from [initial-plan.md](./initial-plan.md) and [use-temporal.md](./use-temporal.md).
+Consolidated build plan for the [AI Engineer Technical Challenge](../../challenge-specs/README.md). This document is the single source of truth for execution. Temporal deployment rationale: [use-temporal.md](./use-temporal.md).
 
 **Execution path**
 
@@ -65,25 +65,26 @@ The system receives load events, tracking pings, inbound communications, and sch
 | Python packaging | **[uv](https://docs.astral.sh/uv/)** — lockfile, venv, `uv run`, Docker installs |
 | Durable async / queue / timers / per-load lock | **Temporal Cloud** + `temporalio` Python SDK |
 | Agent decision (inside activities) | LLM call with SOP + customer config (LangGraph optional, not required for v1) |
+| LLM provider | **[OpenRouter](https://openrouter.ai/)** — OpenAI-compatible API; one key, many models (§2.9) |
 | Persistence | **Temporal Cloud** (load/workflow state, events, timers) + **Langfuse** (LLM + tool-call audit) |
 | Compute | AWS ECS Fargate (API behind ALB, Worker egress-only) |
 | IaC | Terraform |
 | Local dev | `temporal server start-dev` + docker-compose |
 | AI tracing | **Langfuse** (OpenTelemetry + activity instrumentation) — [Temporal integration](https://langfuse.com/integrations/frameworks/temporal) |
 
-### 2.2 Why Temporal supersedes the pgmq plan
+### 2.2 Why Temporal
 
-The [initial-plan](./initial-plan.md) used Supabase Postgres + `pgmq` + advisory locks + a custom timer poller. The [Temporal brief](./use-temporal.md) shows Temporal Cloud replaces those concerns with fewer moving parts:
+Temporal Cloud is the durable orchestration layer for this project:
 
-| Concern | pgmq plan | Temporal plan |
-| --- | --- | --- |
-| Queue between API and worker | `pgmq.send` / `read` | Task Queue in Temporal Cloud |
-| Per-load serialization | `pg_advisory_xact_lock` | `workflow_id = load-{load_id}` |
-| Timers / follow-ups | `timers` table + poller loop | `await asyncio.sleep(...)` in workflow |
-| Retries | Hand-rolled on consumer | `RetryPolicy` on activities |
-| Crash recovery | Visibility timeout + replay queue | Workflow event history replay |
+| Concern | Approach |
+| --- | --- |
+| API decoupled from agent execution | Task Queue; API starts workflows and sends signals |
+| Per-load serialization | `workflow_id = load-{load_id}` (singleton guarantee) |
+| Timers / follow-ups | `await asyncio.sleep(...)` in workflow |
+| Retries | `RetryPolicy` on activities |
+| Crash recovery | Workflow event history replay |
 
-**Net:** one managed control plane (Temporal Cloud) + one Python SDK instead of pgmq, poller, and lock code. Workers still run in our AWS account; Temporal never executes application code.
+Workers run in our AWS account; Temporal Cloud hosts the control plane only and never executes application code.
 
 ### 2.3 Request flow
 
@@ -242,7 +243,8 @@ langfuse
 opentelemetry-api
 opentelemetry-sdk
 opentelemetry-exporter-otlp-proto-http
-# If using OpenAI SDK directly in activities:
+# OpenRouter via OpenAI SDK in activities (see §2.9):
+openai
 openinference-instrumentation-openai
 ```
 
@@ -258,7 +260,7 @@ LANGFUSE_ENABLED=true
 **Bootstrap** (`app/observability/langfuse.py`)
 
 1. Configure OTel `TracerProvider` with OTLP HTTP exporter pointing at Langfuse's OTel endpoint (per [Langfuse OTel docs](https://langfuse.com/docs/opentelemetry/get-started)).
-2. On worker startup, register instrumentors before activities run (e.g. `OpenAIInstrumentor().instrument()` if using OpenAI SDK).
+2. On worker startup, register instrumentors before activities run (e.g. `OpenAIInstrumentor().instrument()` on the OpenAI client used for OpenRouter — §2.9).
 3. Wrap `run_agent_activity` with Langfuse `@observe()` (or manual span) and set metadata: `load_id`, `event_id`, `sop_branch`, `customer_id`.
 
 **Activity trace shape (target)**
@@ -282,15 +284,62 @@ run_agent_activity
 2. Post one fixture event (`3b_load_question_found`).
 3. Confirm trace appears in Langfuse project with workflow/activity nesting and tool-call children.
 
-### 2.9 Model fallback
+### 2.9 LLM provider — OpenRouter
 
-```text
-primary_model → fallback_model → mock_model (eval / CI)
+All live agent decisions call models through **[OpenRouter](https://openrouter.ai/docs/quickstart)**. OpenRouter exposes an [OpenAI-compatible Chat Completions API](https://openrouter.ai/docs/api-reference/chat-completion); we use the official **`openai`** Python SDK with a custom `base_url`, not a vendor-specific Anthropic/Google SDK. That keeps one client, one instrumentor, and easy model swaps via env vars.
+
+| Concern | Choice |
+| --- | --- |
+| API base URL | `https://openrouter.ai/api/v1` (default; override with `OPENROUTER_BASE_URL` only if needed) |
+| Auth | `OPENROUTER_API_KEY` in `.env` / Secrets Manager |
+| Primary model | `OPENROUTER_MODEL_PRIMARY` (e.g. `anthropic/claude-sonnet-4`) |
+| Fallback model | `OPENROUTER_MODEL_FALLBACK` (e.g. `openai/gpt-4o-mini`) |
+| Eval / CI | `MODEL_MODE=mock` — no HTTP to OpenRouter; deterministic fixture mapping |
+| Live runs | `MODEL_MODE=live` — primary → fallback on retriable errors; then fail or escalate per activity policy |
+| Tracing | Langfuse generation spans via `openinference-instrumentation-openai` on the same OpenAI client |
+| Rubric metadata | Langfuse captures model id, tokens, latency, and cost from OpenRouter responses |
+
+**Client bootstrap** (`app/agent/models.py` — Phase 2)
+
+```python
+from openai import AsyncOpenAI
+
+def openrouter_client() -> AsyncOpenAI:
+    return AsyncOpenAI(
+        base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+        api_key=os.environ["OPENROUTER_API_KEY"],
+        default_headers={
+            "HTTP-Referer": os.getenv("OPENROUTER_HTTP_REFERER", "https://github.com/freight-hero/watchtower"),
+            "X-Title": os.getenv("OPENROUTER_APP_TITLE", "FreightHero Watchtower"),
+        },
+    )
 ```
 
-- Env: `MODEL_MODE=live|mock`, `OPENAI_API_KEY`, etc.
-- Mock returns deterministic decisions mapped to fixture expectations for CI.
+Optional OpenRouter headers (`HTTP-Referer`, `X-Title`) are recommended for provider dashboards; not required for local evals.
+
+**Model fallback chain**
+
+```text
+OPENROUTER_MODEL_PRIMARY → OPENROUTER_MODEL_FALLBACK → mock (MODEL_MODE=mock or chain exhausted)
+```
+
+- `MODEL_MODE=mock`: skip OpenRouter entirely; return deterministic decisions mapped to fixture expectations (CI, `make eval` without keys).
+- `MODEL_MODE=live`: call primary; on retriable provider errors (rate limit, 5xx, timeout), retry then try fallback model; surface failure to workflow/activity retry policy if both fail.
 - Langfuse traces live runs when `LANGFUSE_ENABLED=true` and `MODEL_MODE=live`.
+
+**Environment** (`.env.example` + `infra/app-secrets.json`)
+
+```text
+MODEL_MODE=mock|live
+OPENROUTER_API_KEY=sk-or-...
+OPENROUTER_MODEL_PRIMARY=anthropic/claude-sonnet-4
+OPENROUTER_MODEL_FALLBACK=openai/gpt-4o-mini
+# OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+# OPENROUTER_HTTP_REFERER=https://...
+# OPENROUTER_APP_TITLE=FreightHero Watchtower
+```
+
+Do **not** use `OPENAI_API_KEY` for this project unless you intentionally bypass OpenRouter (not planned).
 
 ---
 
@@ -475,13 +524,13 @@ resource "temporalcloud_namespace" "fh" {
 | ECS service `api` | Behind ALB, port 8000 |
 | ECS service `worker` | **No load balancer**, egress-only SG |
 | ALB + target group | Public API base URL |
-| Secrets Manager | `TEMPORAL_API_KEY`, LLM keys |
+| Secrets Manager | `TEMPORAL_API_KEY`, `OPENROUTER_API_KEY`, Langfuse keys |
 | IAM roles | Task execution + least-privilege app role |
 
 **Secrets (never commit)**
 
 - `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, `TEMPORAL_API_KEY`
-- `OPENAI_API_KEY` (or equivalent)
+- `OPENROUTER_API_KEY` (and optional `OPENROUTER_MODEL_*` if not baked into task env)
 - `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`
 
 **Phase 1 exit criteria**
@@ -587,18 +636,20 @@ first_arrival_message_key: ask_unloading_and_pod
 
 Command: `make eval` → writes/updates `evals/EVAL_REPORT.md`.
 
-### 4.7 Model fallback wiring
+### 4.7 Model fallback wiring (OpenRouter)
 
-- `app/agent/models.py` — chain config
-- `MODEL_MODE=mock` forces deterministic responses for CI
-- Document in README how reviewers run evals without API keys
+- [ ] `uv add openai openinference-instrumentation-openai`
+- [ ] `app/agent/models.py` — `openrouter_client()`, primary/fallback model ids, `complete()` wrapper with fallback + `MODEL_MODE=mock` short-circuit
+- [ ] `app/config.py` — load `OPENROUTER_*` settings (replace any `OPENAI_API_KEY` placeholder)
+- [ ] `MODEL_MODE=mock` forces deterministic responses for CI (no OpenRouter HTTP)
+- [ ] Document in README how reviewers run `make eval` without `OPENROUTER_API_KEY`
 
 ### 4.8 Langfuse setup (agent harness)
 
 - [ ] `app/observability/langfuse.py` — OTel provider + Langfuse OTLP exporter
 - [ ] Worker startup calls `init_langfuse()` before registering activities
 - [ ] `@observe()` on `run_agent_activity` with `load_id`, `event_id`, `customer_id`, `sop_branch` metadata
-- [ ] OpenAI instrumentor (if using OpenAI SDK) registered in worker only
+- [ ] `OpenAIInstrumentor` registered on the OpenRouter-backed OpenAI client in worker only
 - [ ] Log line emits `langfuse_trace_id` when a trace is created (links logs ↔ Langfuse UI)
 - [ ] `LANGFUSE_ENABLED=false` documented for eval/CI without cloud keys
 - [ ] Capture one example trace URL in `docs/evidence/` before submission
@@ -822,7 +873,7 @@ When moving from spec to code:
 | SOP + customer behavior | §2.7 |
 | Mocked recorded tools | §4.4 |
 | Timers not task types | §2.2 |
-| Model fallback | §2.9, §4.7 |
+| Model fallback | §2.9 (OpenRouter), §4.7 |
 | 5 public endpoints | §2.4, §5 |
 | Containerized | §3.3 |
 | IaC + real cloud | §3.5, §8 |
@@ -834,11 +885,11 @@ When moving from spec to code:
 
 | Topic | Source |
 | --- | --- |
-| Repo layout, SOP nodes, customer YAML | [initial-plan.md](./initial-plan.md) |
+| Repo layout, SOP nodes, customer YAML | §3.1, §2.7 (this document) |
 | Temporal Cloud, signal-with-start, ECS, testing | [use-temporal.md](./use-temporal.md) |
 | Challenge rules, API, assets | [challenge-specs/README.md](../../challenge-specs/README.md) |
 | Scoring expectations | [challenge-specs/assets/rubric.md](../../challenge-specs/assets/rubric.md) |
 
 ---
 
-*Last updated: implementation spec v1.3 — uv for Python management; persistence in Temporal Cloud + Langfuse; Langfuse for AI tracing ([Temporal integration](https://langfuse.com/integrations/frameworks/temporal)).*
+*Last updated: implementation spec v1.4 — OpenRouter as LLM provider (OpenAI-compatible SDK); persistence in Temporal Cloud + Langfuse.*

@@ -2,8 +2,8 @@
 
 ## TL;DR
 - **Yes, use Temporal Cloud, not self-hosted Temporal on AWS.** Temporal Cloud hosts only the orchestration service; your Python Worker process always runs in your own infrastructure. For a one-week take-home, Temporal Cloud is self-serve, has a $1,000 free-credit trial, and avoids the Cassandra/PostgreSQL/Elasticsearch operational burden that the docs explicitly warn small teams about.
-- **AWS is appropriate, but only for the Worker + a thin FastAPI process** — deploy both as containers on ECS Fargate (or a simpler PaaS like Fly.io/Railway if you'd rather skip VPC plumbing). Do not self-host the Temporal Server. The lowest-overhead path is: Temporal Cloud (managed control plane) + one ECS Fargate service that runs your FastAPI HTTP shim and your Temporal Worker, wired with Terraform.
-- **Yes, you still need a thin HTTP layer in front of Temporal.** The Temporal SDK Client is a gRPC library, not a public REST API. Keep FastAPI as a small shim that translates `POST /loads`, `POST /events/*`, `POST /submit-task` into `client.start_workflow(...)` and `handle.signal(...)` calls — using `load_id` as the Workflow ID. Doing this lets Temporal replace pgmq, your custom timer poller, retry logic, and per-load concurrency locking, so the net framework count goes **down**, not up.
+- **AWS is appropriate, but only for the Worker + a thin FastAPI process** — deploy both as containers on ECS Fargate (or Fly.io if you'd rather skip VPC plumbing). Do not self-host the Temporal Server. The lowest-overhead path is: Temporal Cloud (managed control plane) + one ECS Fargate service that runs your FastAPI HTTP shim and your Temporal Worker, wired with Terraform.
+- **Yes, you still need a thin HTTP layer in front of Temporal.** The Temporal SDK Client is a gRPC library, not a public REST API. Keep FastAPI as a small shim that translates `POST /loads`, `POST /events/*`, `POST /submit-task` into `client.start_workflow(...)` and `handle.signal(...)` calls — using `load_id` as the Workflow ID.
 
 ---
 
@@ -54,14 +54,14 @@ Workers don't take inbound HTTP traffic. The official ECS deployment guide is ex
 ### 6. Per-load isolation comes for free via Workflow ID
 The Workflow ID docs state: "Temporal guarantees that only one Workflow Execution with a given Workflow Id can be in an Open state at any given time" and "It is not possible for a new Workflow Execution to spawn with the same Workflow Id as another Open Workflow Execution, regardless of the Workflow Id Reuse Policy."
 
-Combined with the message-handling guarantee from `docs.temporal.io/handling-messages` — "Every time the Workflow wakes up--generally, it wakes up when it needs to--it will process messages in the order they were received, followed by making progress in the Workflow's main method. This execution is on a single thread" — this means: **set `workflow_id = f"load-{load_id}"` and Temporal automatically gives you per-load serialization and isolation.** No advisory locks, no Postgres `SELECT FOR UPDATE`, no pgmq partition keys.
+Combined with the message-handling guarantee from `docs.temporal.io/handling-messages` — "Every time the Workflow wakes up--generally, it wakes up when it needs to--it will process messages in the order they were received, followed by making progress in the Workflow's main method. This execution is on a single thread" — this means: **set `workflow_id = f"load-{load_id}"` and Temporal automatically gives you per-load serialization and isolation.**
 
 ### 7. Signals, Signal-with-Start, Queries, Updates, Timers
 - **Signals**: asynchronous messages from outside the workflow (`await handle.signal(LoadWorkflow.on_tracking_ping, payload)`). Buffered by the server, delivered to the workflow's handler in order.
 - **Signal-with-Start**: atomically starts the workflow if it doesn't exist and delivers the signal, or just delivers the signal if it does. In Python: `client.start_workflow(LoadWorkflow.run, ..., id="load-123", start_signal="on_event", start_signal_args=[event])`. **This is the primitive you want for `POST /events/*` — it makes the API endpoint idempotent and removes the "does the workflow exist yet?" branch from your code.**
 - **Queries**: synchronous, read-only inspection of workflow state (good for `GET /loads/{id}/status`).
 - **Updates**: synchronous request/response into the workflow with validators — useful if `POST /submit-task` needs to return a result instead of fire-and-forget.
-- **Durable Timers**: `await asyncio.sleep(seconds)` inside a workflow becomes a server-persisted timer. Per `docs.temporal.io/develop/python/timers`: "A Workflow can sleep for months. Timers are persisted, so even if your Worker or Temporal Service is down when the time period completes, as soon as your Worker and Temporal Service are back up, the sleep() call will resolve and your code will continue executing." **This natively replaces the custom timer poller.**
+- **Durable Timers**: `await asyncio.sleep(seconds)` inside a workflow becomes a server-persisted timer. Per `docs.temporal.io/develop/python/timers`: "A Workflow can sleep for months. Timers are persisted, so even if your Worker or Temporal Service is down when the time period completes, as soon as your Worker and Temporal Service are back up, the sleep() call will resolve and your code will continue executing."
 
 ### 8. Testing: time-skipping makes the eval harness fast
 The Python SDK ships `temporalio.testing.WorkflowEnvironment.start_time_skipping()`, which lazily downloads an in-memory test server binary that fast-forwards its clock whenever no work is pending. A workflow that calls `await asyncio.sleep(24*60*60)` completes in milliseconds in tests. Activities can be mocked via `ActivityEnvironment` or by registering mock activity functions on the test worker. For end-to-end local runs, `temporal server start-dev` starts a full single-binary server + Web UI on `localhost:7233` and `localhost:8233` (in-memory by default, `--db-filename` for persistence).
@@ -91,14 +91,14 @@ AWS resources (ECR repo, ECS cluster, Fargate task definition, IAM roles, Secret
 
 ### How Temporal maps onto FreightHero Watchtower
 
-| Requirement | Current plan (FastAPI + pgmq + custom poller + LangGraph) | Temporal mapping |
-|---|---|---|
-| API decoupled from agent execution | pgmq queue between FastAPI and consumer | FastAPI calls `client.start_workflow(...)` / `handle.signal(...)`; Worker pool consumes from Temporal Task Queue |
-| Per-load state outside process memory | Supabase Postgres row per load | Workflow Event History persisted in Temporal Cloud; in-workflow `self.state` survives crashes via replay |
-| Events for same load isolated under concurrency | Postgres advisory lock keyed on `load_id` | `workflow_id = f"load-{load_id}"` — server enforces singleton, single-threaded message loop |
-| Timers / scheduled follow-ups | Custom poller scanning a `due_at` table | `await asyncio.sleep(timedelta(...))` inside the workflow |
-| Containerized | Docker | Same Docker image runs FastAPI + Worker |
-| Deployed via Terraform | AWS resources via `hashicorp/aws` | Same + `temporalio/temporalcloud` provider for the namespace |
+| Requirement | Temporal mapping |
+|---|---|
+| API decoupled from agent execution | FastAPI calls `client.start_workflow(...)` / `handle.signal(...)`; Worker pool consumes from Temporal Task Queue |
+| Per-load state outside process memory | Workflow Event History persisted in Temporal Cloud; in-workflow `self.state` survives crashes via replay |
+| Events for same load isolated under concurrency | `workflow_id = f"load-{load_id}"` — server enforces singleton, single-threaded message loop |
+| Timers / scheduled follow-ups | `await asyncio.sleep(timedelta(...))` inside the workflow |
+| Containerized | Docker — same image runs FastAPI + Worker |
+| Deployed via Terraform | `hashicorp/aws` + `temporalio/temporalcloud` for the namespace |
 
 **Concrete code shape:**
 
@@ -155,22 +155,6 @@ async def post_event(load_id: str, event: dict):
     return {"workflow_id": handle.id}
 ```
 
-### Framework-count audit (the "keep it simple" question)
-
-Adopting Temporal **removes** more than it adds:
-
-| Component | Without Temporal | With Temporal Cloud |
-|---|---|---|
-| Queue | pgmq extension on Supabase Postgres | (gone — Task Queue is in Temporal Cloud) |
-| Timer poller | Custom Python loop + a `scheduled_jobs` table | (gone — `asyncio.sleep` in the workflow) |
-| Retry/backoff logic | Hand-rolled around the pgmq consumer | (gone — `RetryPolicy` on activities) |
-| Per-load concurrency lock | Postgres advisory lock or `FOR UPDATE` | (gone — Workflow ID uniqueness) |
-| Per-load state persistence | Custom Postgres schema + serialization | (gone — workflow object fields are the state) |
-| LangGraph for agent orchestration | LangGraph | Optional; `temporalio.contrib.langgraph_plugin` exists, but for a one-week build you can call the LLM directly from a single activity and skip LangGraph entirely |
-| New dependency | — | Temporal Cloud + `temporalio` Python package |
-
-Net: you trade one new vendor dependency (Temporal Cloud) and one Python library (`temporalio`) for the removal of pgmq, a custom timer poller, custom retry code, custom locking, and arguably LangGraph. For a take-home judged on simplicity, this is a clear win.
-
 ### Where to run the Worker process
 
 | Option | Pros | Cons | Recommendation |
@@ -178,7 +162,7 @@ Net: you trade one new vendor dependency (Temporal Cloud) and one Python library
 | **AWS ECS Fargate** | First-class Terraform support; official Temporal blog guide & reference repo; matches "real cloud account" rubric | VPC, NAT/egress, IAM roles add ~150 lines of HCL | **Pick this if Terraform-on-AWS is explicitly graded** |
 | AWS App Runner | Simpler than ECS; one resource | Designed for HTTP services that scale on requests — Workers don't take inbound traffic, so scaling won't behave as designed | Workable but awkward |
 | Single EC2 + systemd | Cheapest, simplest IaC | Manual patching, no auto-recovery | Acceptable for a demo; weak engineering signal |
-| Fly.io / Railway | Dead-simple `fly deploy` / `railway up`; egress-only is fine | Not AWS — may not satisfy "real cloud account" rubric | Pick if the rubric says "any cloud" |
+| Fly.io | Dead-simple `fly deploy`; egress-only is fine | Not AWS — may not satisfy "real cloud account" rubric | Pick if the rubric says "any cloud" |
 | docker-compose | Local dev / eval harness only | Not deployable | Use for `make dev` |
 
 The cleanest "one-week" answer for an AWS rubric: a single Fargate task definition built from one Docker image, with two ECS services using different container commands — one running `uvicorn api:app` (behind an ALB) and one running `python -m worker` (no load balancer, egress-only SG). The Temporal Cloud namespace is provisioned via the `temporalcloud` Terraform provider; the API key lives in AWS Secrets Manager and is injected into the task via the ECS `secrets` block.
