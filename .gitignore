@@ -15,11 +15,9 @@ infra/.terraform/
 coverage.xml
 htmlcov/
 .scannerwork/
-docker/sonarqube/data/
-docker/sonarqube/extensions/
-docker/sonarqube/logs/
 dist/
 build/
 *.egg-info/
 terraform.exe
 infra/app-secrets.json
+docker/sonarqube

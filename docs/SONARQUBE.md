@@ -6,7 +6,15 @@ Based on [Try out SonarQube](https://docs.sonarsource.com/sonarqube-server/9.9/t
 
 ## Persistence
 
-SonarQube stores data on the host under `docker/sonarqube/` (bind mounts for `data`, `extensions`, and `logs`). These directories are gitignored. `docker compose -f docker-compose.sonar.yml down` keeps your instance; delete the folders under `docker/sonarqube/` to reset.
+SonarQube uses named Docker volumes (fixed names so they survive compose project renames):
+
+| Volume | Purpose |
+| --- | --- |
+| `freight-hero-sonarqube_sonarqube_data` | DB + search index |
+| `freight-hero-sonarqube_sonarqube_extensions` | Plugins |
+| `freight-hero-sonarqube_sonarqube_logs` | Logs |
+
+`docker compose -f docker-compose.sonar.yml down` keeps data. To reset: `down` then `docker volume rm` the three volumes above.
 
 ## 1. Start SonarQube
 
@@ -61,7 +69,7 @@ After a successful run, open the project in SonarQube to review issues, security
 docker compose -f docker-compose.sonar.yml down
 ```
 
-Data is kept under `docker/sonarqube/`. To wipe the instance, stop the container and delete those directories.
+Data is kept in the named volumes above. To wipe the instance, remove those volumes after `down`.
 
 ## Troubleshooting
 

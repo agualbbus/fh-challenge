@@ -23,7 +23,7 @@ wait_sonar_healthy() {
   return 1
 }
 
-echo "==> Starting SonarQube (persistent data: docker/sonarqube/)"
+echo "==> Starting SonarQube (persistent Docker volumes: freight-hero-sonarqube_sonarqube_*)"
 docker compose -f docker-compose.sonar.yml up -d
 
 wait_sonar_healthy 180

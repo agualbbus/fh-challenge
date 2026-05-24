@@ -5,7 +5,7 @@ $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $Root
 
 function Wait-SonarHealthy {
-    param([int]$TimeoutSeconds = 180)
+    param([int]$TimeoutSeconds = 300)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     Write-Host "Waiting for SonarQube at http://localhost:9000 ..."
     while ((Get-Date) -lt $deadline) {
@@ -23,7 +23,7 @@ function Wait-SonarHealthy {
     throw "SonarQube did not become healthy within ${TimeoutSeconds}s."
 }
 
-Write-Host "==> Starting SonarQube (persistent data: docker/sonarqube/)"
+Write-Host "==> Starting SonarQube (persistent Docker volumes: freight-hero-sonarqube_sonarqube_*)"
 docker compose -f docker-compose.sonar.yml up -d
 
 Wait-SonarHealthy

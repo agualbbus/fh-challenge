@@ -9,14 +9,26 @@ services:
       # Required on some hosts (Docker Desktop / constrained VMs); see SonarQube troubleshooting.
       SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
     volumes:
-      # Host bind mounts — survives `docker compose down` (omit `-v`). Data under docker/sonarqube/.
-      - ./docker/sonarqube/data:/opt/sonarqube/data
-      - ./docker/sonarqube/extensions:/opt/sonarqube/extensions
-      - ./docker/sonarqube/logs:/opt/sonarqube/logs
+      # Named volumes persist across `docker compose down` (omit `-v`). Fixed names avoid
+      # duplicate volumes when the compose project name changes.
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:9000/api/system/status | grep -q UP || exit 1"]
       interval: 15s
       timeout: 10s
-      retries: 20
-      start_period: 90s
+      retries: 30
+      start_period: 120s
+
+volumes:
+  sonarqube_data:
+    name: freight-hero-sonarqube_sonarqube_data
+    external: true
+  sonarqube_extensions:
+    name: freight-hero-sonarqube_sonarqube_extensions
+    external: true
+  sonarqube_logs:
+    name: freight-hero-sonarqube_sonarqube_logs
+    external: true
