@@ -59,6 +59,8 @@ See [infra/README.md](infra/README.md) for RDS, SQS, and Secrets Manager.
 
 ## Makefile
 
+## Makefile
+
 | Target | Description |
 | --- | --- |
 | `make install` | `uv sync` |

@@ -12,7 +12,9 @@ __pycache__/
 *.tfstate.*
 infra/.terraform/
 .coverage
+coverage.xml
 htmlcov/
+.scannerwork/
 dist/
 build/
 *.egg-info/

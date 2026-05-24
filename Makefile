@@ -1,7 +1,7 @@
-.PHONY: install dev-api dev-worker test eval help
+.PHONY: install dev-api dev-worker test eval sonar-up sonar-scan help
 
 help:
-	@echo "Targets: install dev-api dev-worker test eval"
+	@echo "Targets: install dev-api dev-worker test eval sonar-up sonar-scan"
 
 install:
 	uv sync
@@ -17,3 +17,9 @@ test:
 
 eval:
 	uv run python evals/run_evals.py
+
+sonar-up:
+	docker compose -f docker-compose.sonar.yml up -d
+
+sonar-scan:
+	./scripts/sonar-scan.sh
