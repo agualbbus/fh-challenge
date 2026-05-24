@@ -441,7 +441,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 ### 4.2 Cursor / project rules
 
-Add `.cursor/rules/` (or `AGENTS.md`) covering:
+Add `.cursor/rules/` (or `CLAUDE.md`) covering:
 
 - Durable execution: router + tools inside LangGraph `@task`; API publishes to SQS only
 - Customer config: always read YAML profile, never hardcode customer branches
