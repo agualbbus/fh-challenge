@@ -114,7 +114,9 @@ def build_mock_responses(
     content = _content(event)
     channel = _channel(event)
     task = load_state.get("active_task") or "delivery_eta_checkpoint"
-    customer_id = load_state.get("customer_id", "customer_a")
+    customer_id = load_state.get("customer_id")
+    if not customer_id:
+        raise ValueError("load_state missing customer_id")
     load_data = load_state.get("load_data", {})
 
     if _is_load_info_question(content):

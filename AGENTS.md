@@ -12,7 +12,8 @@ Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for
 
 | Document | Role |
 | --- | --- |
-| [challenge-specs/README.md](challenge-specs/README.md) | Challenge requirements, API contract, rubric |
+| [challenge-specs/README.md](challenge-specs/README.md) | Challenge requirements, API contract |
+| [challenge-specs/assets/rubric.md](challenge-specs/assets/rubric.md) | Submission scoring and review expectations |
 | [docs/research/implementation-spec.md](docs/research/implementation-spec.md) | **Single source of truth** for architecture |
 | [docs/BACKLOG.md](docs/BACKLOG.md) | Phased checklist |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design write-up |
@@ -72,4 +73,4 @@ Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for
 
 ---
 
-*Last updated: consolidated worker package (`app/worker/`).*
+*Last updated: canonical rubric doc added.*

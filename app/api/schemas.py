@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
-CustomerId = Literal["customer_a", "customer_b", "customer_c"]
+from app.customers.base import validate_customer_id
+
+CustomerId = Annotated[str, Field(min_length=1), BeforeValidator(validate_customer_id)]
 LoadState = Literal["on_route_to_delivery", "at_delivery", "delivered", "pod_collected"]
 TaskInstructionType = Literal["delivery_eta_checkpoint", "confirm_delivery"]
 Channel = Literal["sms", "email"]

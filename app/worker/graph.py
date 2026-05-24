@@ -30,7 +30,9 @@ def _now_iso() -> str:
 
 
 def _build_system_prompt(load_state: dict[str, Any], event: dict[str, Any]) -> str:
-    customer_id = load_state.get("customer_id", "customer_a")
+    customer_id = load_state.get("customer_id")
+    if not customer_id:
+        raise ValueError("load_state missing customer_id")
     profile = get_customer_profile(customer_id)
     task = load_state.get("active_task") or "delivery_eta_checkpoint"
     sop = get_sop_section(task, "load_information_question")
