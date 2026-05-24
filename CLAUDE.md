@@ -71,6 +71,23 @@ Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for
 - Eval harness uses `graph.aget_state`; no read HTTP API.
 - SQS max delay 900s — use EventBridge for longer ETA follow-ups in production.
 
----
+## Keep CLAUDE.md files in sync
 
-*Last updated: canonical rubric doc added.*
+**Whenever you change code, also update any `CLAUDE.md` it describes — in the same change, before declaring the task done.** These files are the agent contract for the project; stale guidance is worse than no guidance.
+
+Triggers that require a doc update:
+
+- Adding, removing, renaming, splitting, or merging a module that appears in a Module Map.
+- Changing routing edges, graph nodes, checkpoint state fields, or any flow shown in a mermaid diagram.
+- Renaming public functions or moving them between modules (cross-check Module Map rows and prose references).
+- Changing run commands, environment variables, or local-stack requirements.
+- Adding a new fixture branch, customer-profile flag, SOP section, or mock-model rule (live + mock paths must stay parallel).
+- Changing layer boundaries (e.g., what belongs in `app/queue/` vs `app/worker/`).
+
+Where to update:
+
+- Root [`CLAUDE.md`](CLAUDE.md) — architecture-wide decisions, conventions, phase map.
+- Per-module `CLAUDE.md` (e.g. [`app/worker/CLAUDE.md`](app/worker/CLAUDE.md)) — module map, internal flows, gotchas. Each module's "Keep In Sync" section lists its triggers.
+- If a change touches both scopes, update both.
+
+After editing, re-read the updated section end-to-end to confirm every named symbol and every mermaid node still matches the code.

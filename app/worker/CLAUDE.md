@@ -17,7 +17,11 @@ Entrypoint flow: [`__main__.py`](__main__.py) calls [`main.py`](main.py), which 
 | [`main.py`](main.py) | Bootstrap checkpointer, preload customer YAML, wire `on_message` to `process_work_message`. |
 | [`checkpointer.py`](checkpointer.py) | Manage the `AsyncPostgresSaver` lifecycle and run checkpoint migrations once per process. |
 | [`state.py`](state.py) | Define `LoadGraphState`; `tool_calls` uses an `operator.add` reducer for append-style accumulation. |
-| [`graph.py`](graph.py) | Build the LangGraph graph, route work items, invoke `create_agent`, wrap side effects in `@task`, and expose eval state reads. |
+| [`graph.py`](graph.py) | Compile the `StateGraph`, wire conditional edges from START, and expose the public surface (`process_work_message`, `query_load_state`, `route_event` re-export, addressing helpers). |
+| [`nodes.py`](nodes.py) | One node per work `kind` (`seed`, `task`, `timer`, `event`) plus `select_branch` used by the conditional edge from START. The `event` node wraps the agent invocation in `@task`. |
+| [`agent.py`](agent.py) | `build_agent` (`create_agent` factory), `sop_prompt` dynamic prompt, `WatchtowerAgentState`, `run_agent_for_event`, and the `route_event` broker guard. |
+| [`tool_extraction.py`](tool_extraction.py) | Pure `extract_tool_records` — pairs `AIMessage.tool_calls` with their `ToolMessage` results into `ToolCallRecord`s. |
+| [`merge.py`](merge.py) | Pure helpers: `init_load_state` and `merge_load_data` (top-level merge, one level deep into `load_data`). |
 | [`llm.py`](llm.py) | Select the chat model: OpenRouter for live runs or the fixture mock model for `MODEL_MODE=mock`. |
 | [`mock_model.py`](mock_model.py) | Deterministic fixture LLM that emits tool calls from keyword and customer-profile rules. |
 | [`sops.py`](sops.py) | Load branch-scoped SOP markdown sections from [`../sops/`](../sops/). |
@@ -51,9 +55,9 @@ sequenceDiagram
     Main->>SQS: long poll
     SQS->>Main: WorkMessage
     Main->>Graph: ainvoke input thread_id=load-{id}
-    Graph->>Graph: process_work_item
-    Graph->>Graph: _run_agent_task @task
-    Graph->>Agent: route_work_item / run_agent
+    Graph->>Graph: select_branch on kind
+    Graph->>Graph: event_node @task _invoke_agent
+    Graph->>Agent: route_event / run_agent_for_event
     Agent->>Agent: ALL_TOOLS mocked
     Graph->>PG: checkpoint merge
     Main->>SQS: delete on success
@@ -70,51 +74,47 @@ Key details:
 
 ```mermaid
 flowchart TD
-    START --> process
-    process -->|"kind=seed"| initLoad["init load_state"]
-    process -->|"kind!=seed"| agentTask["_run_agent_task @task"]
-    agentTask --> route["route_work_item"]
-    route -->|"kind=task"| taskBranch["state_delta active_task"]
-    route -->|"kind=timer"| timerBranch["noop timer_fired"]
-    route -->|"kind=event"| routeEvent["route_event"]
-    routeEvent -->|"broker"| brokerNoop["noop broker_messages"]
-    routeEvent -->|"inbound_comm"| agent["run_agent_for_event"]
-    routeEvent -->|"other"| eventNoop["noop no_action"]
-    agent --> merge["_apply_decision"]
-    taskBranch --> merge
-    brokerNoop --> merge
-    timerBranch --> merge
-    eventNoop --> merge
-    initLoad --> END
-    merge --> END
+    START -->|select_branch on kind| seed["seed_node"]
+    START -->|select_branch on kind| taskN["task_node"]
+    START -->|select_branch on kind| timer["timer_node"]
+    START -->|select_branch on kind| event["event_node"]
+    event --> invoke["@task _invoke_agent"]
+    invoke --> route["route_event"]
+    route -->|"broker"| brokerNoop["noop broker_messages"]
+    route -->|"inbound_comm"| agent["run_agent_for_event"]
+    route -->|"other"| eventNoop["noop no_action"]
+    seed --> END
+    taskN --> END
+    timer --> END
+    event --> END
 ```
 
-`seed` initializes `load_state` and returns without invoking the agent. `task` currently sets `active_task`, `timer` records a noop branch, broker messages short-circuit before the LLM, and supported inbound communications enter the agent path.
+The conditional edge from `START` (`select_branch`) dispatches on `state["kind"]`: `seed` initializes `load_state`, `task` sets `active_task`, `timer` is a noop placeholder for Phase 4+, and `event` invokes the agent through the durable `@task`-wrapped `_invoke_agent`. Inside `route_event`, broker messages short-circuit before the LLM and supported inbound communications enter `run_agent_for_event`.
 
 ## Agent Stack
 
 ```mermaid
 flowchart LR
-    subgraph graphLayer [graph.py]
-        routeEvent --> runAgent["run_agent_for_event"]
+    subgraph agentLayer [agent.py]
+        routeEvent["route_event"] --> runAgent["run_agent_for_event"]
         runAgent --> ctxVars["load_state_var / current_event_var"]
-        runAgent --> getAgent["get_agent create_agent"]
+        runAgent --> buildAgent["build_agent create_agent"]
     end
     subgraph llmLayer [llm.py]
-        getAgent --> modeCheck{MODEL_MODE}
+        buildAgent --> modeCheck{MODEL_MODE}
         modeCheck -->|mock| mockModel["mock_model.build_mock_model"]
         modeCheck -->|live| openRouter["ChatOpenRouter"]
     end
     subgraph promptLayer [sops.py + customers]
-        getAgent --> sopPrompt["@dynamic_prompt sop_prompt"]
+        buildAgent --> sopPrompt["@dynamic_prompt sop_prompt"]
         sopPrompt --> sopFile["app/sops/*.md section"]
         sopPrompt --> profile["CustomerProfile YAML"]
     end
-    getAgent --> tools["app/tools/tools.py ALL_TOOLS"]
-    runAgent --> extract["_extract_tool_records to checkpoint"]
+    buildAgent --> tools["app/tools/tools.py ALL_TOOLS"]
+    runAgent --> extract["tool_extraction.extract_tool_records to checkpoint"]
 ```
 
-`run_agent_for_event` sets context variables before building the agent. The dynamic prompt reads load state, the current event, customer profile settings, and a branch-specific SOP section. `llm.py` chooses a live OpenRouter model or the deterministic mock. Tool calls are recovered from `AIMessage` and `ToolMessage` pairs and appended to checkpoint state.
+`run_agent_for_event` sets context variables before building the agent (the live prompt path reads `load_state` / `current_event` straight from `request.state`; ContextVars stay only because the mock LLM factory in `llm.py` and stateful tools read them). The dynamic prompt reads load state, the current event, customer profile settings, and a branch-specific SOP section. `llm.py` chooses a live OpenRouter model or the deterministic mock. Tool calls are recovered from `AIMessage` and `ToolMessage` pairs by `tool_extraction.extract_tool_records` and appended to checkpoint state.
 
 ## Checkpoint State
 
@@ -139,7 +139,7 @@ Tests and evals read checkpoints through [`query_load_state`](graph.py), includi
 | `MODEL_MODE=mock` | `MockToolCallingModel` emits deterministic tool calls from keyword rules. | CI and fixture evals must run without OpenRouter and without model nondeterminism. |
 | Context vars | `load_state_var` and `current_event_var` pass hidden state to tools and the mock. | LangChain tool schemas should stay simple and match challenge-facing tool inputs. |
 | Broker guard | Broker inbound communications short-circuit before the agent. | This is a locked design decision; the event is still accepted by the API. |
-| Tool call recording | `_extract_tool_records` parses model/tool messages and stores records in `tool_calls`. | Evals assert the trajectory from Postgres state, not only from LangSmith traces. |
+| Tool call recording | `tool_extraction.extract_tool_records` parses model/tool messages and stores records in `tool_calls`. | Evals assert the trajectory from Postgres state, not only from LangSmith traces. |
 | SOP prompt slice | The prompt injects the `load_information_question` section today. | The current implementation is a Phase 3 slice; the full SOP files remain in [`../sops/`](../sops/). |
 | Narrow event routing | Unsupported event types return `noop` with `sop_branch=no_action`. | Phase 4+ fixtures are still pending. |
 | Timer branch | `kind=timer` returns `noop` with `sop_branch=timer_fired`. | ETA follow-up agent behavior has not been implemented yet. |
