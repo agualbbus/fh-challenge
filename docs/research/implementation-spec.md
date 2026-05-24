@@ -1,6 +1,6 @@
 # FreightHero Watchtower — Implementation Spec
 
-Consolidated build plan for the [AI Engineer Technical Challenge](../../challenge-specs/README.md). This document is the single source of truth for execution. Temporal deployment rationale: [use-temporal.md](./use-temporal.md).
+Consolidated build plan for the [AI Engineer Technical Challenge](../../challenge-specs/README.md). This document is the single source of truth for execution. (Historical Temporal notes: [use-temporal.md](./use-temporal.md) — superseded.)
 
 **Execution path**
 
@@ -27,18 +27,18 @@ The system receives load events, tracking pings, inbound communications, and sch
 
 | Deliverable | How we satisfy it |
 | --- | --- |
-| Public API (5 write endpoints) | FastAPI shim → Temporal signal-with-start / workflow start |
-| API decoupled from agent execution | Temporal Task Queue + per-load workflows |
-| Persistent per-load state | **Temporal Cloud** — workflow fields + event history (replay-safe) |
-| Per-load concurrency safety | `workflow_id = load-{load_id}` (Temporal singleton guarantee) |
+| Public API (5 write endpoints) | FastAPI shim → SQS FIFO publish (`202`) |
+| API decoupled from agent execution | SQS FIFO + LangGraph worker |
+| Persistent per-load state | **PostgreSQL** — LangGraph checkpoints |
+| Per-load concurrency safety | SQS `MessageGroupId=load_id` + `thread_id=load-{load_id}` |
 | Customer A/B/C behavior | Declarative YAML profiles, no scattered `if customer` |
-| Mocked tools + durable records | Tool registry; each call recorded as Langfuse span + workflow state delta |
-| Timers (not task types) | Durable `asyncio.sleep` in workflow; cancel via workflow logic |
+| Mocked tools + durable records | Tool registry; `tool_calls[]` in checkpoint state |
+| Timers (not task types) | Delayed SQS messages (`kind=timer`); cancel via state + registry tools |
 | Model fallback | Primary → fallback → mock (env-selectable for evals) |
 | Containerized | One Docker image, two ECS commands (API + Worker) |
-| IaC + real cloud | Terraform: `temporalio/temporalcloud` + `hashicorp/aws` |
+| IaC + real cloud | Terraform: `hashicorp/aws` (RDS, SQS, ECS) |
 | Local run + evals | `docker-compose`, `make eval`, `EVAL_REPORT.md` |
-| Observability | Structured logs + Temporal Web UI + **Langfuse** for LLM/agent traces |
+| Observability | Structured logs + **LangSmith** for LLM/agent traces |
 | Architecture write-up | `docs/ARCHITECTURE.md` |
 | AI disclosure | `AI_USAGE.md` |
 
@@ -46,11 +46,11 @@ The system receives load events, tracking pings, inbound communications, and sch
 
 | Rubric area | Spec response |
 | --- | --- |
-| Production architecture | Thin API, Temporal orchestration, declarative customers |
-| SOP / agent behavior | SOP prompt templates + branch router in activity |
+| Production architecture | Thin API, SQS + LangGraph, declarative customers |
+| SOP / agent behavior | SOP prompt + LangChain `create_agent` in `@task` |
 | Evals | Fixture-driven harness, required/forbidden tool assertions |
 | Deployment / security | ECS Fargate, Secrets Manager, no secrets in repo |
-| Observability | Logs tie request → workflow → activity → tool calls |
+| Observability | Logs tie request → SQS → graph step → tool calls; LangSmith for live LLM |
 | Engineering judgment | One-week scope; explicit gaps and intentional omissions |
 
 ---
@@ -63,28 +63,26 @@ The system receives load events, tracking pings, inbound communications, and sch
 | --- | --- |
 | Language / API | Python 3.12 + FastAPI |
 | Python packaging | **[uv](https://docs.astral.sh/uv/)** — lockfile, venv, `uv run`, Docker installs |
-| Durable async / queue / timers / per-load lock | **Temporal Cloud** + `temporalio` Python SDK |
-| Agent decision (inside activities) | LLM call with SOP + customer config (LangGraph optional, not required for v1) |
-| LLM provider | **[OpenRouter](https://openrouter.ai/)** — OpenAI-compatible API; one key, many models (§2.9) |
-| Persistence | **Temporal Cloud** (load/workflow state, events, timers) + **Langfuse** (LLM + tool-call audit) |
-| Compute | AWS ECS Fargate (API behind ALB, Worker egress-only) |
-| IaC | Terraform |
-| Local dev | `temporal server start-dev` + docker-compose |
-| AI tracing | **Langfuse** (OpenTelemetry + activity instrumentation) — [Temporal integration](https://langfuse.com/integrations/frameworks/temporal) |
+| Queue / API decoupling | **AWS SQS FIFO** (`MessageGroupId = load_id`) |
+| Agent orchestration | **LangGraph** with [durable execution](https://docs.langchain.com/oss/python/langgraph/durable-execution) (`@task`) |
+| Persistence | **PostgreSQL** — [`AsyncPostgresSaver`](https://reference.langchain.com/python/langgraph/checkpoints) |
+| LLM provider | **[ChatOpenRouter](https://reference.langchain.com/python/langchain-openrouter/chat_models/ChatOpenRouter)** via `langchain-openrouter` (§2.9) |
+| Compute | AWS ECS Fargate (API behind ALB, agent worker egress-only) |
+| IaC | Terraform (`hashicorp/aws`) |
+| Local dev | `docker compose` — Postgres + ElasticMQ + API + worker |
+| AI tracing | **LangSmith** (`LANGCHAIN_TRACING_V2`) |
 
-### 2.2 Why Temporal
-
-Temporal Cloud is the durable orchestration layer for this project:
+### 2.2 Why LangGraph + SQS + Postgres
 
 | Concern | Approach |
 | --- | --- |
-| API decoupled from agent execution | Task Queue; API starts workflows and sends signals |
-| Per-load serialization | `workflow_id = load-{load_id}` (singleton guarantee) |
-| Timers / follow-ups | `await asyncio.sleep(...)` in workflow |
-| Retries | `RetryPolicy` on activities |
-| Crash recovery | Workflow event history replay |
+| API decoupled from agent | API publishes to SQS; worker invokes graph |
+| Per-load serialization | FIFO `MessageGroupId` + checkpoint `thread_id=load-{load_id}` |
+| Timers / follow-ups | `create_timer` → delayed SQS message (`kind=timer`) |
+| Retries | SQS visibility timeout + DLQ |
+| Crash recovery | LangGraph checkpoints + durable `@task` replay |
 
-Workers run in our AWS account; Temporal Cloud hosts the control plane only and never executes application code.
+One graph step per SQS message; state accumulates in Postgres checkpoints.
 
 ### 2.3 Request flow
 
@@ -95,108 +93,79 @@ flowchart TB
     Api[FastAPI API]
   end
 
-  subgraph temporal [Temporal Cloud - operational persistence]
-    TC[Temporal Service]
-    TQ[Task Queue freight-watchtower]
-    History["Event history + workflow state\n(load_data, milestone, timers)"]
+  subgraph queue [AWS SQS FIFO]
+    Q["freight-watchtower.fifo\nMessageGroupId = load_id"]
   end
 
-  subgraph aws [AWS ECS Fargate]
-    Worker[Temporal Worker]
-    WF[LoadWorkflow per load_id]
-    Act["Activities: agent, tools"]
+  subgraph agent [ECS Worker]
+    Consumer[SQS Consumer]
+    Graph[LangGraph LoadGraph]
+    Router[route_work_item]
+    Tools[ToolRegistry + Recorder]
   end
 
-  subgraph langfuse [Langfuse - AI persistence]
-    Traces["Traces: prompts, decisions,\ntool calls, branches, cost"]
+  subgraph persist [Persistence]
+    PG[(PostgreSQL)]
+    CP[AsyncPostgresSaver checkpoints]
+  end
+
+  subgraph observe [Observability]
+    LS[LangSmith]
   end
 
   Client --> Api
-  Api -->|"start_workflow / signal_with_start"| TC
-  TC --> TQ
-  TC --> History
-  TQ --> Worker
-  Worker --> WF
-  WF <-->|"read/write state"| History
-  WF --> Act
-  Act -->|"OTel spans"| Traces
-  Act -->|"merge decision + tool_calls"| WF
+  Api -->|"SendMessage 202"| Q
+  Q --> Consumer
+  Consumer -->|"ainvoke thread_id=load-{id}"| Graph
+  Graph --> Router
+  Router --> Tools
+  Graph <-->|"durable state"| CP
+  CP --> PG
+  Graph -->|"LANGCHAIN_TRACING_V2"| LS
 ```
 
-**Persistence split:** Temporal Cloud is the source of truth for per-load operational state (milestone, `load_data`, pending events, timer handles, activity outcomes). Langfuse is the source of truth for AI audit data (prompts, model output, tool invocations, SOP branch, latency/cost). No separate application database is required for v1; evals assert against workflow queries and/or Langfuse trace exports.
+**Persistence split:** PostgreSQL checkpoints hold per-load operational state (`load_state`, `tool_calls`, `active_timers`). LangSmith (optional) holds AI audit data for live runs. Evals assert against `graph.aget_state` — no read HTTP API.
 
-### 2.4 API → Temporal mapping
+### 2.4 API → SQS mapping
 
-| Endpoint | Temporal operation |
+| Endpoint | SQS work item |
 | --- | --- |
-| `POST /loads` | `start_workflow(LoadWorkflow.run, load_id, id=load-{load_id}, ...)` with seed payload |
-| `POST /submit-task` | Signal `on_task` or start workflow with task payload |
-| `POST /events/inbound-communication` | **Signal-with-start** `on_event` with event payload |
-| `POST /events/tracking` | Signal-with-start `on_event` |
-| `POST /events/load-update` | Signal-with-start `on_event` |
+| `POST /loads` | `{kind: "seed", load_id, payload: seed}` |
+| `POST /submit-task` | `{kind: "task", load_id, payload: task}` |
+| `POST /events/inbound-communication` | `{kind: "event", load_id, payload: event}` |
+| `POST /events/tracking` | `{kind: "event", ...}` |
+| `POST /events/load-update` | `{kind: "event", ...}` |
 
-Signal-with-start makes event endpoints idempotent: no "does workflow exist?" branch in API code.
+FIFO `MessageGroupId=load_id` serializes messages per load. `MessageDeduplicationId` from `event_id` / `task_uuid` / seed uuid makes duplicate POSTs idempotent. API returns `202` with `{accepted, load_id, workflow_id}` where `workflow_id` is `load-{load_id}` (LangGraph `thread_id`).
 
-```python
-# API pattern (illustrative)
-await client.start_workflow(
-    LoadWorkflow.run,
-    load_id,
-    id=f"load-{load_id}",
-    task_queue="freight-watchtower",
-    id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
-    start_signal="on_event",
-    start_signal_args=[event],
-)
-return Response(status_code=202)
-```
+### 2.5 Graph state and processing model
 
-### 2.5 LoadWorkflow shape
+**One SQS message = one graph step.** The worker calls `graph.ainvoke(input, config)` with `configurable.thread_id = f"load-{load_id}"`, then acks the message after a successful invoke.
 
-```python
-@workflow.defn
-class LoadWorkflow:
-    def __init__(self):
-        self.load_state: dict = {}      # milestone, load_data, customer_id
-        self.session: dict = {}         # short-term context for follow-ups
-        self.pending: asyncio.Queue = asyncio.Queue()
-        self.active_timers: dict = {}   # timer_type -> handle metadata
+Checkpointed fields (`app/worker/state.py`):
 
-    @workflow.signal
-    async def on_event(self, event: dict): ...
+| Field | Purpose |
+| --- | --- |
+| `load_state` | `milestone`, `load_data`, `customer_id`, `active_task` |
+| `session` | Short-term context for follow-ups |
+| `tool_calls` | Tool records from the latest step (eval assertions) |
+| `active_timers` | Timer metadata; `create_timer` also schedules delayed SQS |
 
-    @workflow.signal
-    async def on_task(self, task: dict): ...
+`kind=seed` initializes `load_state` from the load payload; other kinds run the agent orchestrator (`create_agent` for events).
 
-    @workflow.query
-    def get_state(self) -> dict: ...
+### 2.6 Agent processing (inside `@task`)
 
-    @workflow.run
-    async def run(self, load_id: str, seed: dict | None = None):
-        # Initialize from seed; loop: dequeue event → activity → apply decision
-        ...
-```
-
-**Determinism rule:** no I/O, `datetime.now()`, or LLM calls inside `@workflow.defn` methods. All non-determinism lives in `@activity.defn` functions.
-
-### 2.6 Agent activity (inside Temporal)
-
-Each event triggers one activity run (not a multi-node LangGraph graph for v1):
+Side effects run in `_run_agent_task` (`@task` in `app/worker/graph.py`), which calls `route_work_item`:
 
 ```
-classify_sender → select_sop_branch → gather_context → decide_actions → execute_tools → persist_state
+broker_guard → create_agent (ReAct loop) → extract tool_calls → persist_state
 ```
 
-Implemented as a single `run_agent_activity(state, event) -> AgentDecision` that:
-
-1. Short-circuits broker senders (no-op, log reason).
-2. Selects ETA vs Confirm Delivery branch from event + load milestone.
-3. Loads customer profile YAML for `customer_id`.
-4. Calls LLM with SOP prompt sections + state + event (or deterministic mock in eval mode).
-5. Executes mocked tools via registry; records each call.
-6. Returns state delta + tool call list for workflow to merge.
-
-LangGraph may be added later via `temporalio.contrib.langgraph_plugin`; not required for the first feature slice.
+1. Short-circuit broker senders (no-op, log reason).
+2. Build SOP system prompt from customer YAML + active task + event.
+3. Invoke LangChain `create_agent` — `ChatOpenRouter` when `MODEL_MODE=live`, fixture mock LLM when `mock`.
+4. Agent selects and executes tools via LangChain tool-calling loop.
+5. Extract `ToolCallRecord`s from message history; merge `state_delta` into checkpoint; schedule timer SQS when needed.
 
 ### 2.7 Customer-specific behavior
 
@@ -216,116 +185,38 @@ Reference matrix: [customer-expectations.md](../../challenge-specs/assets/custom
 
 ### 2.8 Observability
 
-Three complementary surfaces (challenge rubric expects logs/traces connecting API → processing → tool calls):
-
 | Layer | Surface | What to capture |
 | --- | --- | --- |
-| API + ops path | Structured JSON logs | `request_id`, `load_id`, `event_id`, endpoint, `202`, workflow_id |
-| Orchestration | Temporal Web UI | workflow runs, signals, timers, activity retries |
-| AI / agent | **Langfuse** | prompts, completions, model, latency, cost, tool calls, SOP branch, state delta |
+| API + ops | Structured JSON logs | `load_id`, `event_id`, endpoint, `202`, `workflow_id` |
+| Orchestration | Postgres checkpoints + SQS metrics | per-load state, DLQ depth |
+| AI / agent | **LangSmith** (optional) | LLM spans when `LANGCHAIN_TRACING_V2=true` |
 
-Structured JSON logs must allow answering: *"Why did the agent call these tools for this event?"* Langfuse traces answer *"What did the model see and decide?"*
+Structured logs answer *"Why did the agent call these tools?"* LangSmith traces (live mode) answer *"What did the model see and decide?"*
 
-#### 2.8.1 Langfuse + Temporal
+**LangSmith** (optional — env vars only)
 
-We use [Langfuse's Temporal integration pattern](https://langfuse.com/integrations/frameworks/temporal): emit OpenTelemetry spans from **activities** (never from workflow code — determinism). Langfuse ingests OTel and shows nested traces: workflow execution → `run_agent_activity` → LLM calls → tool executions.
+- Set `LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT` for live runs.
+- Default off in CI (`MODEL_MODE=mock` needs no LangSmith key).
+- LangChain auto-instruments agent calls when tracing is enabled.
 
-**Principles**
+### 2.9 LLM provider — OpenRouter via ChatOpenRouter
 
-- Instrument **activities only** (`run_agent_activity`, helper activities). Workflow code stays deterministic.
-- Propagate correlation IDs into every Langfuse span: `load_id`, `event_id`, `customer_id`, `workflow_id`, `sop_branch`.
-- Disable Langfuse export in CI when `MODEL_MODE=mock` (optional `LANGFUSE_ENABLED=false`).
-
-**Dependencies** (add with `uv add`; listed in `pyproject.toml`)
-
-```text
-langfuse
-opentelemetry-api
-opentelemetry-sdk
-opentelemetry-exporter-otlp-proto-http
-# OpenRouter via OpenAI SDK in activities (see §2.9):
-openai
-openinference-instrumentation-openai
-```
-
-**Environment** (`.env.example` + Secrets Manager)
-
-```text
-LANGFUSE_PUBLIC_KEY=pk-lf-...
-LANGFUSE_SECRET_KEY=sk-lf-...
-LANGFUSE_BASE_URL=https://cloud.langfuse.com   # or https://us.cloud.langfuse.com
-LANGFUSE_ENABLED=true
-```
-
-**Bootstrap** (`app/observability/langfuse.py`)
-
-1. Configure OTel `TracerProvider` with OTLP HTTP exporter pointing at Langfuse's OTel endpoint (per [Langfuse OTel docs](https://langfuse.com/docs/opentelemetry/get-started)).
-2. On worker startup, register instrumentors before activities run (e.g. `OpenAIInstrumentor().instrument()` on the OpenAI client used for OpenRouter — §2.9).
-3. Wrap `run_agent_activity` with Langfuse `@observe()` (or manual span) and set metadata: `load_id`, `event_id`, `sop_branch`, `customer_id`.
-
-**Activity trace shape (target)**
-
-```text
-run_agent_activity
-├── classify_sender
-├── select_sop_branch
-├── llm_decide          ← generation span (input messages, output, tokens)
-└── execute_tools       ← child spans per tool name + arguments summary
-```
-
-**Submission evidence**
-
-- Include at least one Langfuse trace URL (or exported JSON) from a deployed or local run in `docs/evidence/`.
-- Cross-link `request_id` / `event_id` in structured logs to the Langfuse trace id in log fields.
-
-**Local verification**
-
-1. Start Temporal dev server + worker.
-2. Post one fixture event (`3b_load_question_found`).
-3. Confirm trace appears in Langfuse project with workflow/activity nesting and tool-call children.
-
-### 2.9 LLM provider — OpenRouter
-
-All live agent decisions call models through **[OpenRouter](https://openrouter.ai/docs/quickstart)**. OpenRouter exposes an [OpenAI-compatible Chat Completions API](https://openrouter.ai/docs/api-reference/chat-completion); we use the official **`openai`** Python SDK with a custom `base_url`, not a vendor-specific Anthropic/Google SDK. That keeps one client, one instrumentor, and easy model swaps via env vars.
+Live agent decisions use **[ChatOpenRouter](https://reference.langchain.com/python/langchain-openrouter/chat_models/ChatOpenRouter)** (`langchain-openrouter`) in `app/worker/llm.py`.
 
 | Concern | Choice |
 | --- | --- |
-| API base URL | `https://openrouter.ai/api/v1` (default; override with `OPENROUTER_BASE_URL` only if needed) |
 | Auth | `OPENROUTER_API_KEY` in `.env` / Secrets Manager |
-| Primary model | `OPENROUTER_MODEL_PRIMARY` (e.g. `anthropic/claude-sonnet-4`) |
-| Fallback model | `OPENROUTER_MODEL_FALLBACK` (e.g. `openai/gpt-4o-mini`) |
-| Eval / CI | `MODEL_MODE=mock` — no HTTP to OpenRouter; deterministic fixture mapping |
-| Live runs | `MODEL_MODE=live` — primary → fallback on retriable errors; then fail or escalate per activity policy |
-| Tracing | Langfuse generation spans via `openinference-instrumentation-openai` on the same OpenAI client |
-| Rubric metadata | Langfuse captures model id, tokens, latency, and cost from OpenRouter responses |
-
-**Client bootstrap** (`app/agent/models.py` — Phase 2)
-
-```python
-from openai import AsyncOpenAI
-
-def openrouter_client() -> AsyncOpenAI:
-    return AsyncOpenAI(
-        base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-        api_key=os.environ["OPENROUTER_API_KEY"],
-        default_headers={
-            "HTTP-Referer": os.getenv("OPENROUTER_HTTP_REFERER", "https://github.com/freight-hero/watchtower"),
-            "X-Title": os.getenv("OPENROUTER_APP_TITLE", "FreightHero Watchtower"),
-        },
-    )
-```
-
-Optional OpenRouter headers (`HTTP-Referer`, `X-Title`) are recommended for provider dashboards; not required for local evals.
+| Primary model | `OPENROUTER_MODEL_PRIMARY` |
+| Fallback model | `OPENROUTER_MODEL_FALLBACK` |
+| Eval / CI | `MODEL_MODE=mock` — fixture mock LLM, no HTTP |
+| Live runs | `MODEL_MODE=live` — primary → fallback on retriable errors |
+| Tracing | LangSmith auto-instruments LangChain calls when tracing enabled |
 
 **Model fallback chain**
 
 ```text
-OPENROUTER_MODEL_PRIMARY → OPENROUTER_MODEL_FALLBACK → mock (MODEL_MODE=mock or chain exhausted)
+OPENROUTER_MODEL_PRIMARY → OPENROUTER_MODEL_FALLBACK → fail (or mock when MODEL_MODE=mock)
 ```
-
-- `MODEL_MODE=mock`: skip OpenRouter entirely; return deterministic decisions mapped to fixture expectations (CI, `make eval` without keys).
-- `MODEL_MODE=live`: call primary; on retriable provider errors (rate limit, 5xx, timeout), retry then try fallback model; surface failure to workflow/activity retry policy if both fail.
-- Langfuse traces live runs when `LANGFUSE_ENABLED=true` and `MODEL_MODE=live`.
 
 **Environment** (`.env.example` + `infra/app-secrets.json`)
 
@@ -334,12 +225,10 @@ MODEL_MODE=mock|live
 OPENROUTER_API_KEY=sk-or-...
 OPENROUTER_MODEL_PRIMARY=anthropic/claude-sonnet-4
 OPENROUTER_MODEL_FALLBACK=openai/gpt-4o-mini
-# OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-# OPENROUTER_HTTP_REFERER=https://...
-# OPENROUTER_APP_TITLE=FreightHero Watchtower
+LANGCHAIN_TRACING_V2=false
+# LANGCHAIN_API_KEY=lsv2_...
+# LANGCHAIN_PROJECT=freight-watchtower
 ```
-
-Do **not** use `OPENAI_API_KEY` for this project unless you intentionally bypass OpenRouter (not planned).
 
 ---
 
@@ -367,25 +256,31 @@ freighthero-watchtower/
 ├── app/
 │   ├── api/
 │   │   ├── main.py
-│   │   ├── routes.py
-│   │   └── schemas.py          # from challenge-input.schema.json
-│   ├── workflows/
-│   │   └── load_workflow.py
-│   ├── activities/
-│   │   ├── agent.py
-│   │   └── persist.py
+│   │   ├── routes.py           # SQS publish only
+│   │   └── schemas.py
+│   ├── worker/                 # SQS consumer + LangGraph + create_agent
+│   │   ├── __main__.py         # python -m app.worker
+│   │   ├── main.py             # bootstrap
+│   │   ├── graph.py            # LangGraph per-load processor
+│   │   ├── state.py
+│   │   ├── checkpointer.py
+│   │   ├── agent.py            # create_agent factory
+│   │   ├── router.py           # guards + route_work_item
+│   │   ├── llm.py              # ChatOpenRouter / mock dispatch
+│   │   ├── mock_model.py
+│   │   ├── load_data.py
+│   │   └── sops.py
+│   ├── queue/
+│   │   ├── messages.py
+│   │   ├── publisher.py
+│   │   └── consumer.py
 │   ├── tools/
 │   │   ├── registry.py
 │   │   └── recorder.py
 │   ├── customers/
-│   │   ├── base.py
-│   │   ├── customer_a.yaml
-│   │   ├── customer_b.yaml
-│   │   └── customer_c.yaml
-│   ├── sops/                   # copied/adapted from challenge-specs/assets/sops/
+│   ├── sops/
 │   └── observability/
-│       ├── logging.py
-│       └── langfuse.py         # OTel exporter + @observe helpers
+│       └── logging.py
 │
 ├── evals/
 │   ├── run_evals.py
@@ -397,7 +292,8 @@ freighthero-watchtower/
 │   ├── main.tf
 │   ├── variables.tf
 │   ├── outputs.tf
-│   ├── temporal.tf
+│   ├── aws_rds.tf
+│   ├── aws_sqs.tf
 │   ├── aws_ecs.tf
 │   ├── aws_ecr.tf
 │   ├── aws_secrets.tf
@@ -419,7 +315,7 @@ Use **uv** for all Python dependency and interpreter management. Do not use `pip
 # Install uv: https://docs.astral.sh/uv/getting-started/installation/
 uv python pin 3.12
 uv init --app          # if starting empty; otherwise use existing pyproject.toml
-uv add fastapi uvicorn temporalio pydantic langfuse pytest pytest-asyncio
+uv add fastapi uvicorn langgraph langgraph-checkpoint-postgres langchain langchain-openrouter langsmith boto3 pydantic pytest pytest-asyncio
 uv add --dev ruff mypy # optional
 uv lock
 uv sync
@@ -432,7 +328,7 @@ uv sync
 | `uv sync` | Install deps from `uv.lock` into `.venv` |
 | `uv add <pkg>` | Add dependency and update lockfile |
 | `uv run uvicorn app.api.main:app --reload` | Run API locally |
-| `uv run python -m app.worker` | Run Temporal worker |
+| `uv run python -m app.worker` | Run SQS + LangGraph worker |
 | `uv run pytest` | Unit tests |
 | `uv run python evals/run_evals.py` | Eval harness |
 
@@ -453,17 +349,17 @@ Commit **`uv.lock`** and **`.python-version`**. CI and Docker builds use `uv syn
 | Command | Purpose |
 | --- | --- |
 | `uv sync` | Create/update `.venv` from lockfile |
-| `temporal server start-dev` | Local Temporal + UI (`localhost:8233`) |
 | `make dev-api` / `make dev-worker` | Run services via uv |
-| `docker-compose up` | API + Worker containers (image built with uv) |
+| `docker compose up` | Postgres + ElasticMQ + API + worker |
 | `make test` | `uv run pytest` |
 | `make eval` | Run fixture harness |
 
 `docker-compose.yml` services:
 
-- `api` — `uv run uvicorn app.api.main:app --host 0.0.0.0 --port 8000`
-- `worker` — `uv run python -m app.worker`
-- `temporal` (optional) — `temporal server start-dev` for local persistence
+- `postgresql` — LangGraph checkpoints (`watchtower` DB)
+- `elasticmq` — local SQS FIFO
+- `api` — FastAPI ingress
+- `worker` — `python -m app.worker`
 
 ### 3.3 Dockerfile
 
@@ -486,61 +382,48 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Worker: python -m app.worker
 ```
 
-### 3.4 Persistence model (no app database)
+### 3.4 Persistence model
 
 | Data | Where it lives | How evals/reviewers access it |
 | --- | --- | --- |
-| Load seed, milestone, `load_data` | Temporal workflow state | `@workflow.query get_state` |
-| Inbound events, signals, timers | Temporal event history | Temporal Web UI + workflow replay |
-| LLM prompts/completions, branches | Langfuse traces | Langfuse UI / trace export API |
-| Tool calls (challenge contract) | Langfuse spans + `tool_calls[]` on workflow state after each activity | Eval harness reads workflow query result and/or Langfuse export |
+| Load seed, milestone, `load_data` | Postgres checkpoint `load_state` | `graph.aget_state(thread_id=load-{id})` |
+| Tool calls (challenge contract) | Checkpoint `tool_calls[]` | Eval harness `query_load_state` |
+| Timers | `active_timers` + delayed SQS messages | State + queue inspection |
+| LLM audit (live) | LangSmith | LangSmith UI when tracing enabled |
 
-`app/tools/recorder.py` writes tool-call observations to Langfuse and appends to the in-workflow `tool_calls` list so assertions do not require a SQL store.
+`app/tools/recorder.py` appends tool-call records returned in graph state for eval assertions.
 
 ### 3.5 Terraform (IaC)
 
 **Providers**
 
-- `temporalio/temporalcloud` — namespace, API key auth
-- `hashicorp/aws` — ECS, ECR, ALB, Secrets Manager, IAM
-
-**Temporal Cloud resources**
-
-```hcl
-resource "temporalcloud_namespace" "fh" {
-  name           = "freight-watchtower-dev"
-  regions        = ["aws-us-east-1"]
-  retention_days = 14
-  api_key_auth   = true
-}
-```
+- `hashicorp/aws` — RDS, SQS, ECS, ECR, ALB, Secrets Manager, IAM
 
 **AWS resources**
 
 | Resource | Notes |
 | --- | --- |
+| RDS Postgres | LangGraph checkpoints (`aws_rds.tf`) |
+| SQS FIFO + DLQ | Work queue (`aws_sqs.tf`) |
 | ECR repository | Container image |
-| ECS cluster | Fargate |
-| ECS service `api` | Behind ALB, port 8000 |
-| ECS service `worker` | **No load balancer**, egress-only SG |
+| ECS cluster | Fargate — API + worker services |
 | ALB + target group | Public API base URL |
-| Secrets Manager | `TEMPORAL_API_KEY`, `OPENROUTER_API_KEY`, Langfuse keys |
-| IAM roles | Task execution + least-privilege app role |
+| Secrets Manager | `DATABASE_URL`, `SQS_QUEUE_URL`, `OPENROUTER_API_KEY`, `LANGCHAIN_API_KEY` |
 
 **Secrets (never commit)**
 
-- `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, `TEMPORAL_API_KEY`
-- `OPENROUTER_API_KEY` (and optional `OPENROUTER_MODEL_*` if not baked into task env)
-- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`
+- `DATABASE_URL`, `SQS_QUEUE_URL`, `AWS_REGION`
+- `OPENROUTER_API_KEY` (and optional `OPENROUTER_MODEL_*`)
+- `LANGCHAIN_API_KEY` (optional, live tracing)
 
 **Phase 1 exit criteria**
 
-- [ ] Repo scaffold committed with README local-run section (`uv sync`, `make dev-api`)
-- [ ] `pyproject.toml`, `uv.lock`, `.python-version` committed; `uv sync --frozen` works clean
-- [ ] `docker-compose up` starts API + Worker + Temporal dev
-- [ ] Health endpoints respond (`GET /health`)
-- [ ] Terraform plan succeeds; namespace + ECS skeleton defined
-- [ ] `.env.example` documents all required variables
+- [x] Repo scaffold with README local-run section
+- [x] `pyproject.toml`, `uv.lock`, `.python-version` committed
+- [x] `docker compose up` starts Postgres + ElasticMQ + API + worker
+- [x] `GET /health` responds
+- [x] Terraform plan: RDS + SQS + ECS skeleton
+- [x] `.env.example` documents required variables
 
 ---
 
@@ -552,7 +435,7 @@ resource "temporalcloud_namespace" "fh" {
 
 | Doc | Contents |
 | --- | --- |
-| `docs/ARCHITECTURE.md` | Diagrams, Temporal mapping, tradeoffs, customer-config approach, omissions |
+| `docs/ARCHITECTURE.md` | Diagrams, SQS/LangGraph mapping, tradeoffs, customer-config approach, omissions |
 | `docs/DEPLOYMENT.md` | Cloud resources, secrets, least-privilege, how to capture deploy evidence |
 | `docs/BACKLOG.md` | Prioritized feature list (see §6 Behavior roadmap) |
 
@@ -560,7 +443,7 @@ resource "temporalcloud_namespace" "fh" {
 
 Add `.cursor/rules/` (or `AGENTS.md`) covering:
 
-- Determinism: no I/O in workflow code
+- Durable execution: router + tools inside LangGraph `@task`; API publishes to SQS only
 - Customer config: always read YAML profile, never hardcode customer branches
 - Tool calls: always record via `recorder.py`
 - Broker messages: always no-op
@@ -627,48 +510,39 @@ first_arrival_message_key: ask_unloading_and_pod
 | `evals/run_evals.py` | Single command: seed load → POST events → assert tool_calls + state |
 | `evals/assertions.py` | `required_tool_calls`, `forbidden_tool_calls`, `expected_state` |
 | `evals/fixtures/test-cases.json` | Copy from challenge-specs |
-| Temporal test env | `WorkflowEnvironment.start_time_skipping()` for timer cases |
+| Timer tests | Inject `kind=timer` SQS messages or unit test with `MemorySaver` |
 
 **Eval modes**
 
 1. **Integration** — HTTP against local API + real worker
-2. **Workflow unit** — time-skipping tests for timer-heavy cases (future)
+2. **Graph unit** — `MemorySaver` + direct invoke for timer/router branches
 
 Command: `make eval` → writes/updates `evals/EVAL_REPORT.md`.
 
 ### 4.7 Model fallback wiring (OpenRouter)
 
-- [ ] `uv add openai openinference-instrumentation-openai`
-- [ ] `app/agent/models.py` — `openrouter_client()`, primary/fallback model ids, `complete()` wrapper with fallback + `MODEL_MODE=mock` short-circuit
-- [ ] `app/config.py` — load `OPENROUTER_*` settings (replace any `OPENAI_API_KEY` placeholder)
-- [ ] `MODEL_MODE=mock` forces deterministic responses for CI (no OpenRouter HTTP)
-- [ ] Document in README how reviewers run `make eval` without `OPENROUTER_API_KEY`
+- [x] `app/worker/llm.py` — `ChatOpenRouter`, primary/fallback, `MODEL_MODE=mock` short-circuit
+- [x] `app/config.py` — `OPENROUTER_*`, `MODEL_MODE`, LangSmith vars
+- [x] README documents `make eval` without `OPENROUTER_API_KEY`
 
-### 4.8 Langfuse setup (agent harness)
+### 4.8 LangSmith setup (agent harness)
 
-- [ ] `app/observability/langfuse.py` — OTel provider + Langfuse OTLP exporter
-- [ ] Worker startup calls `init_langfuse()` before registering activities
-- [ ] `@observe()` on `run_agent_activity` with `load_id`, `event_id`, `customer_id`, `sop_branch` metadata
-- [ ] `OpenAIInstrumentor` registered on the OpenRouter-backed OpenAI client in worker only
-- [ ] Log line emits `langfuse_trace_id` when a trace is created (links logs ↔ Langfuse UI)
-- [ ] `LANGFUSE_ENABLED=false` documented for eval/CI without cloud keys
-- [ ] Capture one example trace URL in `docs/evidence/` before submission
+- [ ] Set `LANGCHAIN_TRACING_V2` env vars for live runs; capture one trace URL in `docs/evidence/`
 
-### 4.8 Phase 2 exit criteria
+### 4.9 Phase 2 exit criteria
 
-- [ ] `docs/ARCHITECTURE.md` and `docs/BACKLOG.md` exist
-- [ ] Cursor rules committed
-- [ ] All tools registered; recorder emits Langfuse spans and updates workflow `tool_calls[]`
-- [ ] Customer YAML files match behavior matrix
-- [ ] Eval harness runs (may fail until features implemented)
-- [ ] SOP files present under `app/sops/`
-- [ ] Langfuse wired per §4.8; one manual trace verified in Langfuse UI
+- [x] `docs/ARCHITECTURE.md` and `docs/BACKLOG.md` exist
+- [x] Cursor rules committed (`.cursor/rules/watchtower.mdc`)
+- [x] All tools registered; recorder updates checkpoint `tool_calls[]`
+- [x] Customer YAML files match behavior matrix
+- [x] Eval harness runs
+- [x] SOP files under `app/sops/`
 
 ---
 
 ## 5. Phase 3 — First Feature
 
-**Goal:** Smallest end-to-end vertical slice proving API → Temporal → activity → tool → eval.
+**Goal:** Smallest end-to-end vertical slice proving API → SQS → LangGraph → tool → eval.
 
 ### 5.1 Feature: ETA checkpoint — load information question (info found)
 
@@ -689,14 +563,14 @@ Command: `make eval` → writes/updates `evals/EVAL_REPORT.md`.
 
 | # | Task | Owner layer |
 | --- | --- | --- |
-| 1 | `POST /loads` starts workflow with seed payload | API + Workflow |
-| 2 | `POST /events/inbound-communication` signal-with-start | API |
-| 3 | Workflow dequeues event, calls `run_agent_activity` | Workflow + Activity |
-| 4 | Activity: broker short-circuit (stub for later cases) | Activity |
-| 5 | Activity: branch router detects load-info question | Activity |
-| 6 | Activity: `get_load_info` + `send_sms` via registry | Tools |
-| 7 | Recorder persists tool calls | Tools |
-| 8 | Workflow merges state; query returns milestone | Workflow |
+| 1 | `POST /loads` enqueues seed work item | API + SQS |
+| 2 | `POST /events/inbound-communication` enqueues event | API |
+| 3 | Worker invokes graph with `kind=event` | Worker + Graph |
+| 4 | Router: broker short-circuit (stub for later cases) | Router |
+| 5 | Router: load-info question branch | Router |
+| 6 | Tools: `get_load_info` + `send_sms` via registry | Tools |
+| 7 | Recorder persists tool calls in checkpoint | Tools |
+| 8 | `aget_state` returns milestone + tool_calls | Graph |
 | 9 | Eval case `3b` passes | Evals |
 
 ### 5.3 Second increment (same feature family)
@@ -751,7 +625,7 @@ Prioritized backlog after Phase 3. Each row should add eval coverage before movi
 | P7 | `3j` | POD attachment | `check_attachment`, `update_load_state`, `send_sms` |
 | P8 | — | Confirm delivery branches | POD, lumper, unloading states |
 | P9 | — | Customer C lumper forward | `forward_email` |
-| P10 | — | Timer-fired follow-ups | workflow sleep + cancel |
+| P10 | — | Timer-fired follow-ups | delayed SQS `kind=timer` + cancel tools |
 
 Hidden eval risks to document in `EVAL_REPORT.md`:
 
@@ -787,9 +661,9 @@ assert_tool_forbidden("create_task")
 assert_state("on_route_to_delivery")
 ```
 
-### 7.3 Time-skipping tests (timer cases)
+### 7.3 Timer tests
 
-Use `WorkflowEnvironment.start_time_skipping()` to validate ETA follow-up without waiting 30–60 minutes. Highest-leverage demo for Temporal choice.
+For ETA follow-up fixtures (`3f`), inject a delayed `kind=timer` SQS message in tests (or use `MemorySaver` unit tests in `tests/test_graph.py`). AWS production: SQS `DelaySeconds` max 900s; use EventBridge Scheduler for longer ETA windows.
 
 ---
 
@@ -809,11 +683,11 @@ Use `WorkflowEnvironment.start_time_skipping()` to validate ETA follow-up withou
 
 After first cloud deploy, run one fixture manually against production and save:
 
-- API access log line (request_id, load_id)
-- Temporal workflow history screenshot or export
-- **Langfuse trace URL** for one agent run (LLM + tools visible)
-- Activity log with tool calls
-- Final load state query
+- API access log line (load_id, event_id)
+- SQS message processed + checkpoint snapshot
+- **LangSmith trace URL** for one live agent run (optional)
+- Structured log with tool calls
+- `graph.aget_state` milestone + `tool_calls[]`
 
 ---
 
@@ -823,11 +697,11 @@ After first cloud deploy, run one fixture manually against production and save:
 
 | Risk | Mitigation |
 | --- | --- |
-| Temporal Cloud signup blocked | Fall back to `temporal server start-dev` on EC2/docker-compose; document migration path (only `Client.connect` URL changes) |
-| Determinism violations | Code review rule; SDK sandbox catches most imports; keep I/O in activities only |
-| ECS/IaC time sink | Ship local-first; deploy after first feature passes evals locally |
+| RDS / Postgres unavailable locally | `docker compose up postgresql`; run `checkpointer.setup()` on worker start |
+| SQS 15 min max delay | EventBridge Scheduler → SQS for long ETA follow-ups in AWS |
+| Checkpoint migration drift | Pin `langgraph-checkpoint-postgres`; call `setup()` on deploy |
+| ECS/IaC time sink | Ship local-first; deploy after evals pass locally |
 | LLM non-determinism in evals | `MODEL_MODE=mock` for CI; live model for demo only |
-| ARM Mac time-skipping hangs | Use `start_local()` or Rosetta per Temporal docs |
 
 ### 9.2 Intentional omissions (one-week scope)
 
@@ -836,15 +710,14 @@ After first cloud deploy, run one fixture manually against production and save:
 - Real SMS/email/Slack integrations
 - OCR / real attachment processing
 - Multi-region HA
-- LangGraph graph (optional later)
+- EventBridge timer scheduler (deferred; SQS delay capped at 900s)
 
 Document all omissions in `docs/ARCHITECTURE.md` with "next steps if more time."
 
 ### 9.3 Cost assumptions
 
-- Temporal Cloud: $1,000 trial credit covers take-home traffic
-- AWS: minimal Fargate + ALB (~tens of dollars for review period)
-- No app database in v1 (Temporal + Langfuse only)
+- AWS: minimal Fargate + ALB + small RDS (~tens of dollars for review period)
+- LangSmith free tier sufficient for demo traces
 
 ---
 
@@ -852,11 +725,11 @@ Document all omissions in `docs/ARCHITECTURE.md` with "next steps if more time."
 
 When moving from spec to code:
 
-1. **Initialize repo** per §3.1: `uv python pin 3.12`, `uv init`, `uv add` core deps (`fastapi`, `uvicorn`, `temporalio`, `pydantic`, `langfuse`, OpenTelemetry packages, `pytest`, `pytest-asyncio`), commit `uv.lock`.
-2. **Run Temporal dev server**; implement stub `LoadWorkflow` + health API.
-3. **Apply Terraform** for namespace + ECR; defer full ECS until local eval passes.
+1. **Initialize repo** per §3.1: `uv sync`, LangGraph + SQS + Postgres stack.
+2. **`docker compose up`** — Postgres, ElasticMQ, API, worker.
+3. **Apply Terraform** for RDS + SQS + ECR; defer full ECS until local eval passes.
 4. **Complete Phase 2 harness** (tools, customers, eval runner).
-5. **Implement Phase 3** feature (`3b`, then `3c`).
+5. **Implement Phase 3** (`3b`, `3c`) — done; re-verify after stack changes.
 6. **Deploy** and capture evidence per §8.
 7. **Iterate roadmap** §6 by priority.
 
@@ -867,7 +740,7 @@ When moving from spec to code:
 | Challenge requirement | Spec section |
 | --- | --- |
 | Python implementation | §2.1 |
-| API/worker decoupled | §2.3, §2.4 |
+| API/worker decoupled | §2.2, §2.4 |
 | Persistent per-load state | §2.5, §3.4 |
 | Per-load concurrency | §2.2 |
 | SOP + customer behavior | §2.7 |
@@ -886,10 +759,10 @@ When moving from spec to code:
 | Topic | Source |
 | --- | --- |
 | Repo layout, SOP nodes, customer YAML | §3.1, §2.7 (this document) |
-| Temporal Cloud, signal-with-start, ECS, testing | [use-temporal.md](./use-temporal.md) |
+| Archived Temporal decision brief | [use-temporal.md](./use-temporal.md) (superseded) |
 | Challenge rules, API, assets | [challenge-specs/README.md](../../challenge-specs/README.md) |
 | Scoring expectations | [challenge-specs/assets/rubric.md](../../challenge-specs/assets/rubric.md) |
 
 ---
 
-*Last updated: implementation spec v1.4 — OpenRouter as LLM provider (OpenAI-compatible SDK); persistence in Temporal Cloud + Langfuse.*
+*Last updated: implementation spec v2.0 — LangGraph + SQS FIFO + PostgreSQL checkpoints; LangSmith tracing; ChatOpenRouter.*

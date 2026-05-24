@@ -1,0 +1,16 @@
+customer_id: customer_b
+escalation:
+  channels: [slack]
+geofence_radius_miles: 2
+eta_followup_minutes: 60
+pod:
+  validation: human_review
+  notify_on_received: false
+  notify_delivered_without_pod: false
+missing_load_info:
+  create_task: true
+  notify_slack: true
+  slack_audience: broker
+lumper:
+  mode: review_task
+first_arrival_message_key: ask_unloading_and_pod

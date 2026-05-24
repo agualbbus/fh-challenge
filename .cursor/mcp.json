@@ -1,8 +1,5 @@
 {
   "mcpServers": {
-    "temporal-docs": {
-      "url": "https://temporal.mcp.kapa.ai"
-    },
     "terraform": {
       "command": "docker run -i --rm hashicorp/terraform-mcp-server",
       "env": {},

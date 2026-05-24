@@ -1,0 +1,60 @@
+---
+description: Keep transport, API, and worker layers decoupled — no cyclical imports
+globs: app/**/*.py
+alwaysApply: false
+---
+
+# Layer boundaries
+
+Infrastructure modules must not import orchestration or domain logic. Wire dependencies at the process entrypoint (`app/worker/main.py`, `app/api/main.py`).
+
+## Dependency direction
+
+```
+app/api/     → app/queue/publisher.py   (publish only)
+app/queue/   → handler callback          (transport only)
+app/worker/  → app/queue/, LangGraph    (orchestration + side effects)
+```
+
+Never reverse this flow (e.g. `app/queue/` importing `app/worker/graph.py`).
+
+## Queue consumer
+
+`app/queue/consumer.py` polls SQS, deserializes `WorkMessage`, calls a handler, then acks/deletes.
+
+- Accept `Callable[[WorkMessage], Awaitable[None]]` (or similar), not `BaseCheckpointSaver`, graph, or agent types.
+- Do not invoke LangGraph, route work items, or run tools inside `app/queue/`.
+
+```python
+# ❌ BAD — transport layer owns orchestration
+from app.worker.graph import get_compiled_graph, invoke_input
+
+async def run_consumer(checkpointer: BaseCheckpointSaver) -> None:
+    graph = get_compiled_graph(checkpointer)
+    await graph.ainvoke(...)
+
+# ✅ GOOD — transport delegates; worker wires the handler
+async def run_consumer(handler: MessageHandler) -> None:
+    await handler(work)
+```
+
+Graph invocation belongs in `app/worker/` (e.g. `process.py`); bootstrap in `main.py`:
+
+```python
+async def on_message(msg: WorkMessage) -> None:
+    await process_work_message(checkpointer, msg)
+
+await run_consumer(on_message)
+```
+
+## API routes
+
+- Publish to SQS and return `202`; never call LangGraph or the worker graph directly.
+- No imports from `app/worker/graph.py`, `app/worker/agent.py`, or checkpointer setup.
+
+## Before adding imports
+
+Ask: *Does this module's job require knowing about LangGraph, agents, or checkpoints?*
+
+- **No** → keep the dependency out; pass a callback or move logic to `app/worker/`.
+- **Yes** → code belongs in `app/worker/`, not `app/queue/` or `app/api/`.

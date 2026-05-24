@@ -5,31 +5,13 @@ variable "project_name" {
 }
 
 variable "aws_region" {
-  description = "AWS region for ECS/ECR/ALB (matches Temporal namespace region)."
+  description = "AWS region for ECS/ECR/ALB/RDS/SQS."
   type        = string
   default     = "us-east-1"
 }
 
-variable "temporal_namespace_name" {
-  description = "Temporal Cloud namespace name (2-64 chars, lowercase, hyphens)."
-  type        = string
-  default     = "freight-watchtower-dev"
-}
-
-variable "temporal_account_id" {
-  description = "Optional Temporal Cloud account ID pin (TEMPORAL_CLOUD_ALLOWED_ACCOUNT_ID)."
-  type        = string
-  default     = ""
-}
-
-variable "temporal_retention_days" {
-  description = "Workflow history retention in Temporal Cloud."
-  type        = number
-  default     = 14
-}
-
 variable "enable_aws_resources" {
-  description = "When false, AWS skeleton resources are not created (Temporal-only apply)."
+  description = "When false, AWS resources are not created (plan-only / local dev)."
   type        = bool
   default     = true
 }
@@ -38,4 +20,29 @@ variable "app_secrets_file" {
   description = "Gitignored JSON file of ECS secret key/values (copy from app-secrets.json.example)."
   type        = string
   default     = "app-secrets.json"
+}
+
+variable "db_instance_class" {
+  description = "RDS instance class for PostgreSQL."
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "db_name" {
+  description = "PostgreSQL database name."
+  type        = string
+  default     = "watchtower"
+}
+
+variable "db_username" {
+  description = "PostgreSQL master username."
+  type        = string
+  default     = "watchtower"
+}
+
+variable "db_password" {
+  description = "PostgreSQL master password (override via TF_VAR_db_password)."
+  type        = string
+  sensitive   = true
+  default     = "change-me-in-tfvars"
 }

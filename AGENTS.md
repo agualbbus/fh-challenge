@@ -4,107 +4,72 @@ Context for AI agents working in this repository. **Keep this file up to date** 
 
 ## Project summary
 
-Take-home implementation of **FreightHero AI Watchtower**: a production-shaped agentic system for two freight workflows (ETA checkpoint, confirm delivery). It receives load events, tracking, inbound communications, and timers; runs SOP-driven agents with customer-specific rules; records mocked tool calls; and ships with evals, observability, and cloud deployment.
+Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for ETA checkpoint and confirm delivery workflows, with LangGraph + SQS + PostgreSQL, declarative customer config, mocked recorded tools, and fixture evals.
 
-**Current state (Phase 1 complete):** uv project, `GET /health`, stub `LoadWorkflow` + worker, Docker/compose (Postgres + Temporal auto-setup), Terraform Temporal namespace + AWS skeleton. Phase 2+ (agent harness, write APIs, Langfuse) not started.
+**Current state:** Five write APIs (`202`), SQS FIFO ingress, LangGraph per-load graph with Postgres checkpoints, LangChain `create_agent`, HTTP eval harness for `3b`/`3c`. LangSmith optional via env vars (`LANGCHAIN_TRACING_V2=false` by default). Phase 4+ fixtures and ECS deploy pending.
 
 ## Canonical documents
 
 | Document | Role |
 | --- | --- |
 | [challenge-specs/README.md](challenge-specs/README.md) | Challenge requirements, API contract, rubric |
-| [docs/research/implementation-spec.md](docs/research/implementation-spec.md) | **Single source of truth** for architecture and build details |
-| [docs/BACKLOG.md](docs/BACKLOG.md) | Phased implementation checklist (what to build next) |
-| [docs/research/use-temporal.md](docs/research/use-temporal.md) | Temporal Cloud deployment and SDK notes (optional deep dive) |
-
-Challenge assets: `challenge-specs/assets/` (SOPs, schemas, fixtures, tools, customer expectations).
+| [docs/research/implementation-spec.md](docs/research/implementation-spec.md) | **Single source of truth** for architecture |
+| [docs/BACKLOG.md](docs/BACKLOG.md) | Phased checklist |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design write-up |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Local + cloud deploy notes |
 
 ## Architecture (decided)
 
 | Concern | Choice |
 | --- | --- |
 | Language / API | Python 3.12 + FastAPI |
-| Packaging | [uv](https://docs.astral.sh/uv/) (`uv.lock`, `uv run`) |
-| Durable async / per-load isolation | **Temporal Cloud** (`workflow_id = load-{load_id}`) |
-| Agent runtime | LLM + SOP/customer config inside Temporal activities |
-| LLM provider | **OpenRouter** (OpenAI-compatible API; `openai` SDK + `OPENROUTER_API_KEY`) — Phase 2 |
-| AI tracing | **Langfuse** (OTel + `@observe` on activities) — Phase 2+ |
-| Compute | AWS ECS Fargate (API + Worker from one image) |
-| IaC | Terraform (`infra/`) — Temporal Cloud + AWS |
-| Local dev | `docker-compose`, Makefile targets |
+| Packaging | [uv](https://docs.astral.sh/uv/) |
+| Queue | **AWS SQS FIFO** (`MessageGroupId = load_id`) |
+| Agent / orchestration | **LangGraph** + **LangChain `create_agent`** + durable execution (`@task`) |
+| Persistence | **PostgreSQL** (`AsyncPostgresSaver`) |
+| LLM | **ChatOpenRouter** via `langchain-openrouter` (live); fixture mock LLM (CI) |
+| Tracing | **LangSmith** (optional) |
+| Local stack | `docker compose` → Postgres + ElasticMQ + API + worker |
 
-## Conventions (Phase 1)
+## Grill decisions (locked)
+
+| Topic | Choice |
+| --- | --- |
+| Per-load ID | `thread_id = load-{load_id}` |
+| API → agent | SQS publish only; API never invokes graph |
+| `MODEL_MODE=mock` | Fake LLM (`MockToolCallingModel`) emits fixture tool calls — no OpenRouter |
+| Broker ignore | Pre-agent guard in orchestrator; event still accepted (`202`) |
+| State merge | Graph node applies `AgentDecision` to checkpoint state |
+| API responses | `202` with `{accepted, load_id, workflow_id}` |
+
+## Conventions
 
 | Topic | Convention |
 | --- | --- |
-| Task queue | `freight-watchtower` |
-| Config | `.env` for local app/worker; `infra/app-secrets.json` (gitignored) → Secrets Manager via TF; `terraform.tfvars` for non-secret TF inputs; shell env for TF providers |
-| Run API | `make dev-api` or `uv run uvicorn app.api.main:app --reload --port 8000` |
-| Run worker | `make dev-worker` or `uv run python -m app.worker` |
-| Tests | `make test`; `pythonpath = ["."]` in `pyproject.toml` |
-| Local Temporal | `docker compose` → `temporalio/auto-setup` on `:7233`, namespace `default`, no API key (not `temporal server start-dev`) |
-| Windows / no `make` | Same targets via `uv run` (see README) |
+| SQS queue | `freight-watchtower.fifo` (local: ElasticMQ) |
+| Run API | `uv run uvicorn app.api.main:app --reload --port 8000` |
+| Run worker | `uv run python -m app.worker` |
+| Evals | `uv run python evals/run_evals.py` (needs API + worker + Postgres + SQS) |
+| Tests | `uv run pytest` |
+| Customer config | `CustomerProfile` from YAML — no scattered `if customer_id` |
 
-## Repository layout
+## Phase map
 
-```
-app/               # FastAPI, worker, workflows, activities, tools (stubs)
-evals/             # Eval harness stubs
-infra/             # Terraform
-docs/              # BACKLOG.md, research notes, architecture docs
-challenge-specs/   # Read-only challenge inputs
-```
-
-## Agent workflow
-
-### 1. Before each BACKLOG phase — grill the plan
-
-Before implementing **any phase** in [docs/BACKLOG.md](docs/BACKLOG.md) (Phase 2, 3, …):
-
-1. Apply the **grill-me** skill ([`.agents/skills/grill-me/SKILL.md`](.agents/skills/grill-me/SKILL.md)) or invoke `/grill-me`.
-2. Stress-test that phase’s scope against [implementation-spec.md](docs/research/implementation-spec.md) and challenge requirements.
-
-### 2. While implementing
-
-- Follow [docs/BACKLOG.md](docs/BACKLOG.md) in order unless the user redirects.
-- Match conventions in [implementation-spec.md](docs/research/implementation-spec.md).
-- Use MCP when helpful: Temporal docs (`temporal-docs`), Terraform registry/plan (`terraform`).
-- Minimize scope; avoid unrelated changes.
-- Do not commit unless the user asks.
-
-### 3. Always update this file
-
-After meaningful progress, update **Current state**, **Conventions**, and **Gotchas**.
-
-## Phase map (from BACKLOG)
-
-| Phase | Focus | Status |
-| --- | --- | --- |
-| **1** | Repos, uv, FastAPI/Worker stubs, Docker, Terraform, README | Done |
-| **2** | Agent harness: SOPs, schemas, tools, customers, evals, Langfuse | Next |
-| **3** | First feature: `POST /loads`, inbound signal, evals 3b/3c | Planned |
-| **4+** | Remaining fixtures | Planned |
-| **Submission** | AWS deploy, eval evidence, `AI_USAGE.md`, `EVAL_REPORT.md` | Planned |
+| Phase | Status |
+| --- | --- |
+| **1** Repos, uv, Docker, Terraform skeleton | Done |
+| **2** Agent harness (tools, customers, evals, LangSmith stub) | Done |
+| **3** `3b` / `3c` via `create_agent` + write APIs | Done |
+| **4+** Remaining visible fixtures | Planned |
+| **Submission** | AWS deploy, evidence, `AI_USAGE.md` | Planned |
 
 ## Gotchas
 
-- **Terraform vs `.env`:** Providers read shell env (`TEMPORAL_CLOUD_API_KEY`, `AWS_PROFILE`); app reads `.env` only. Never put Terraform account keys in Secrets Manager for the app.
-- **Two Temporal keys:** `TEMPORAL_CLOUD_API_KEY` (account, Terraform); `TEMPORAL_API_KEY` (namespace, worker/API). Namespace key goes in `.env` locally and in Secrets Manager for ECS.
-- **Secrets Manager:** Copy `infra/app-secrets.json.example` → `app-secrets.json`, fill, `terraform apply` (do not commit). Skips version if file missing. Values also land in `terraform.tfstate` — never commit state. Local dev uses `.env` only.
-- **AWS profile:** Terraform does not use `~/.aws/credentials` unless `AWS_PROFILE` is set (or provider `profile` is configured).
-- **Compose startup:** Temporal `auto-setup` may take ~30–60s before worker connects; retry worker if first connection fails.
-- **Temporal namespace apply:** requires `terraform` CLI and `TEMPORAL_CLOUD_API_KEY`; not run in CI by default.
-- **PowerShell terraform:** run `.\terraform.exe` from `infra/`; quote `-target="resource.name"`.
-- **Security group descriptions:** AWS allows ASCII only (no em dashes in `description` fields).
-- **`/health` + Temporal:** returns `temporal: unreachable` if server is down; still `status: ok`.
-
-## Open / not yet built
-
-- Write APIs, agent activities, SOP/customer YAML in app
-- Langfuse wiring, `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`
-- ECS task definitions/services, image push to ECR, populate Secrets Manager, deployed public URL
-- `AI_USAGE.md`, full `evals/EVAL_REPORT.md`
+- Wrap side effects (agent + tools) in LangGraph `@task` for durable replay.
+- `.dockerignore` excludes `.venv` — required for reasonable image builds.
+- Eval harness uses `graph.aget_state`; no read HTTP API.
+- SQS max delay 900s — use EventBridge for longer ETA follow-ups in production.
 
 ---
 
-*Last updated: OpenRouter as LLM provider (docs); Phase 1 complete.*
+*Last updated: consolidated worker package (`app/worker/`).*
