@@ -1,0 +1,13 @@
+---
+description: FreightHero Watchtower agent conventions
+globs: app/**/*.py, evals/**/*.py
+---
+
+# Watchtower rules
+
+- **Durable execution:** Side effects (agent + tools) run inside LangGraph `@task`; API only publishes to SQS.
+- **Customer config:** Read `CustomerProfile` from YAML; never `if customer_id == "customer_b"` in application code.
+- **Broker:** Short-circuit in `route_work_item` for `sender_type == broker` (no tools).
+- **Tools:** LangChain `@tool` primitives via `create_agent`; append records to checkpoint `tool_calls[]`.
+- **Evals:** Assert via `graph.aget_state` (`thread_id = load-{load_id}`); update fixtures when adding branches.
+- **API:** Successful writes return `202` with `load_id` and `workflow_id` only.
