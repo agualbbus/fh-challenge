@@ -1,0 +1,15 @@
+customer_id: customer_c
+escalation:
+  channels: [email, slack]
+geofence_radius_miles: 3
+eta_followup_minutes: 45
+pod:
+  validation: automatic
+  notify_on_received: false
+  notify_delivered_without_pod: true
+missing_load_info:
+  create_task: true
+  notify_slack: false
+lumper:
+  mode: forward_email
+first_arrival_message_key: ask_unloading_and_pod

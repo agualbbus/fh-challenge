@@ -1,0 +1,10 @@
+.venv
+.git
+.pytest_cache
+__pycache__
+*.pyc
+.env
+infra/.terraform
+infra/terraform.tfstate*
+infra/app-secrets.json
+.cursor

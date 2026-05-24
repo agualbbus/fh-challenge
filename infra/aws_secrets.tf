@@ -2,7 +2,7 @@ resource "aws_secretsmanager_secret" "app" {
   count = var.enable_aws_resources ? 1 : 0
 
   name        = "${var.project_name}/app"
-  description = "Application secrets (Temporal namespace key, LLM keys) - populated from app-secrets.json"
+  description = "Application secrets (DATABASE_URL, SQS_QUEUE_URL, LLM keys) - populated from app-secrets.json"
 
   recovery_window_in_days = 0
 }

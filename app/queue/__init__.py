@@ -1,0 +1,1 @@
+"""SQS FIFO queue integration."""
