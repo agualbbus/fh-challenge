@@ -4,17 +4,9 @@ Static analysis for Python sources using a **local SonarQube Community Edition**
 
 Based on [Try out SonarQube](https://docs.sonarsource.com/sonarqube-server/9.9/try-out-sonarqube).
 
-## Git worktree
+## Persistence
 
-SonarQube setup lives on branch `feat/sonarqube` in a separate worktree (keeps `main` / feature branches clean while you iterate):
-
-```powershell
-# From the primary repo clone
-git worktree list
-# Example path: ..\freight-hero-sonarqube  [feat/sonarqube]
-```
-
-Open that folder in the IDE when working on SonarQube config or running first-time project setup.
+SonarQube stores data on the host under `docker/sonarqube/` (bind mounts for `data`, `extensions`, and `logs`). These directories are gitignored. `docker compose -f docker-compose.sonar.yml down` keeps your instance; delete the folders under `docker/sonarqube/` to reset.
 
 ## 1. Start SonarQube
 
@@ -28,7 +20,7 @@ Default login: `admin` / `admin` (you will be prompted to change the password).
 
 ## 2. Create project and token
 
-1. **Create project** → manual → Project key: `freight-hero-watchtower` (must match `sonar-project.properties`).
+1. **Create project** → manual → Project key: `fh` (must match `sonar.projectKey` in `sonar-project.properties`).
 2. **Generate a token** under *Provide a token* and copy it.
 3. Add to `.env` (from `.env.example`):
 
@@ -56,8 +48,9 @@ Default login: `admin` / `admin` (you will be prompted to change the password).
 **Make:**
 
 ```bash
-make sonar-up    # start server
-make sonar-scan  # run scanner (requires SONAR_TOKEN)
+make sonar-up     # start server
+make sonar-scan   # run scanner (requires SONAR_TOKEN in .env)
+make sonar-test   # up + wait for healthy + scan (integration smoke test)
 ```
 
 After a successful run, open the project in SonarQube to review issues, security hotspots, and *new code* quality (Clean as You Code).
@@ -68,7 +61,7 @@ After a successful run, open the project in SonarQube to review issues, security
 docker compose -f docker-compose.sonar.yml down
 ```
 
-Data is kept in Docker volumes (`sonarqube_data`, etc.). Use `docker compose -f docker-compose.sonar.yml down -v` to wipe the instance.
+Data is kept under `docker/sonarqube/`. To wipe the instance, stop the container and delete those directories.
 
 ## Troubleshooting
 
@@ -76,6 +69,8 @@ Data is kept in Docker volumes (`sonarqube_data`, etc.). Use `docker compose -f 
 | --- | --- |
 | SonarQube container exits on start | Ensure `SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true` (already set in `docker-compose.sonar.yml`). On Linux, you may need higher `vm.max_map_count` — see SonarQube server docs. |
 | Scanner cannot reach server | On Windows/macOS Docker Desktop, use default `host.docker.internal:9000` in `scripts/sonar-scan.ps1`. On Linux, set `SONAR_HOST_URL=http://localhost:9000` and use host networking or `--network host` if needed. |
+| Git Bash: invalid working directory `C:/Program Files/Git/usr/src` | Fixed in `scripts/sonar-scan.sh` via `MSYS_NO_PATHCONV=1`. Re-run `./scripts/sonar-scan.sh` or `make sonar-scan`. |
+| PowerShell `make sonar-scan` error 193 | `make` cannot execute `.ps1` directly; the Makefile invokes PowerShell explicitly on Windows. |
 | Invalid token / 401 | Regenerate token in SonarQube UI; update `.env`. |
 | Project key mismatch | Project key in the UI must equal `sonar.projectKey` in `sonar-project.properties`. |
 

@@ -28,7 +28,13 @@ export SONAR_HOST_URL="$SCANNER_HOST_URL"
 
 echo "Scanning $ROOT -> $SCANNER_HOST_URL"
 
-docker run --rm \
+# Git Bash (MSYS) rewrites -w /usr/src to C:/Program Files/Git/usr/src unless disabled.
+DOCKER=(docker)
+if [[ -n "${MSYSTEM:-}" ]]; then
+  DOCKER=(env MSYS_NO_PATHCONV=1 docker)
+fi
+
+"${DOCKER[@]}" run --rm \
   -e SONAR_HOST_URL="$SCANNER_HOST_URL" \
   -e SONAR_TOKEN="$SONAR_TOKEN" \
   -v "$ROOT:/usr/src" \
