@@ -1,9 +1,10 @@
-"""Agent decision and workflow work-item models."""
+"""Agent decision and tool-call record models."""
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
 
 @dataclass
@@ -17,15 +18,7 @@ class ToolCallRecord:
     created_at: str
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "tool_call_id": self.tool_call_id,
-            "event_id": self.event_id,
-            "load_id": self.load_id,
-            "tool": self.tool,
-            "arguments": self.arguments,
-            "result": self.result,
-            "created_at": self.created_at,
-        }
+        return dataclasses.asdict(self)
 
 
 @dataclass
@@ -33,23 +26,6 @@ class AgentDecision:
     state_delta: dict[str, Any] = field(default_factory=dict)
     active_timers: dict[str, dict[str, Any]] | None = None
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
-    timer_ops: list[dict[str, Any]] = field(default_factory=list)
     noop: bool = False
     reason: str = ""
     sop_branch: str = ""
-
-
-WorkItemKind = Literal["event", "task", "timer"]
-
-
-@dataclass
-class WorkItem:
-    kind: WorkItemKind
-    payload: dict[str, Any]
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"kind": self.kind, "payload": self.payload}
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> WorkItem:
-        return cls(kind=data["kind"], payload=data["payload"])

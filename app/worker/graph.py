@@ -31,7 +31,7 @@ class WatchtowerAgentState(AgentState, total=False):
 
 
 def _now_iso() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _build_system_prompt(load_state: dict[str, Any], event: dict[str, Any]) -> str:
@@ -162,32 +162,15 @@ async def run_agent_for_event(
         current_event_var.reset(event_token)
 
 
-def _sender_type(event: dict[str, Any]) -> str | None:
-    if event.get("event_type") != "inbound_communication":
-        return None
-    return event.get("inbound_communication", {}).get("sender_type")
-
-
-def _handle_broker() -> AgentDecision:
-    return AgentDecision(
-        noop=True,
-        reason="broker message ignored",
-        sop_branch="broker_messages",
-    )
-
-
 async def route_event(
     load_state: dict[str, Any],
     event: dict[str, Any],
     active_timers: dict[str, dict[str, Any]] | None = None,
 ) -> AgentDecision:
-    sender = _sender_type(event)
-    if sender == "broker":
-        return _handle_broker()
-
     if event.get("event_type") == "inbound_communication":
+        if event.get("inbound_communication", {}).get("sender_type") == "broker":
+            return AgentDecision(noop=True, reason="broker message ignored", sop_branch="broker_messages")
         return await run_agent_for_event(load_state, active_timers or {}, event)
-
     return AgentDecision(noop=True, reason="no matching branch", sop_branch="no_action")
 
 
@@ -199,21 +182,18 @@ async def route_work_item(
 ) -> AgentDecision:
     if work_kind == "task":
         task_type = payload.get("task_instruction_type")
-        if task_type:
-            return AgentDecision(
-                state_delta={"active_task": task_type},
-                sop_branch="task_submitted",
-            )
-        return AgentDecision(noop=True, reason="empty task", sop_branch="task_submitted")
-
+        return AgentDecision(
+            state_delta={"active_task": task_type} if task_type else {},
+            noop=not task_type,
+            reason="" if task_type else "empty task",
+            sop_branch="task_submitted",
+        )
     if work_kind == "timer":
-        timer_type = payload.get("timer_type", "eta_followup")
         return AgentDecision(
             noop=True,
-            reason=f"timer fired: {timer_type}",
+            reason=f"timer fired: {payload.get('timer_type', 'eta_followup')}",
             sop_branch="timer_fired",
         )
-
     return await route_event(load_state, payload, active_timers)
 
 

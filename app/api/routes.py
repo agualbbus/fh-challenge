@@ -28,8 +28,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _workflow_id(load_id: str) -> str:
-    return thread_id_for_load(load_id)
+def _publish(load_id: str, kind: str, payload: dict, dedup_id: str) -> AcceptedResponse:
+    try:
+        publish_work_item(WorkMessage(load_id=load_id, kind=kind, payload=payload, dedup_id=dedup_id))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return AcceptedResponse(load_id=load_id, workflow_id=thread_id_for_load(load_id))
 
 
 def _seed_from_load(body: LoadSeedRequest) -> dict:
@@ -77,19 +81,7 @@ async def health() -> dict:
 
 @router.post("/loads", status_code=status.HTTP_202_ACCEPTED, response_model=AcceptedResponse)
 async def create_load(body: LoadSeedRequest) -> AcceptedResponse:
-    seed = _seed_from_load(body)
-    msg = WorkMessage(
-        load_id=body.load_id,
-        kind="seed",
-        payload=seed,
-        dedup_id=dedup_id_for_seed(body.load_id),
-    )
-    try:
-        publish_work_item(msg)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    return AcceptedResponse(load_id=body.load_id, workflow_id=_workflow_id(body.load_id))
+    return _publish(body.load_id, "seed", _seed_from_load(body), dedup_id_for_seed(body.load_id))
 
 
 @router.post(
@@ -99,17 +91,7 @@ async def create_load(body: LoadSeedRequest) -> AcceptedResponse:
 )
 async def submit_task(body: SubmitTaskRequest) -> AcceptedResponse:
     payload = body.model_dump(mode="json")
-    msg = WorkMessage(
-        load_id=body.load_id,
-        kind="task",
-        payload=payload,
-        dedup_id=dedup_id_for_task(payload),
-    )
-    try:
-        publish_work_item(msg)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return AcceptedResponse(load_id=body.load_id, workflow_id=_workflow_id(body.load_id))
+    return _publish(body.load_id, "task", payload, dedup_id_for_task(payload))
 
 
 @router.post(
@@ -119,17 +101,7 @@ async def submit_task(body: SubmitTaskRequest) -> AcceptedResponse:
 )
 async def inbound_communication(body: InboundCommunicationEvent) -> AcceptedResponse:
     payload = body.model_dump(mode="json")
-    msg = WorkMessage(
-        load_id=body.load_id,
-        kind="event",
-        payload=payload,
-        dedup_id=dedup_id_for_event(payload),
-    )
-    try:
-        publish_work_item(msg)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return AcceptedResponse(load_id=body.load_id, workflow_id=_workflow_id(body.load_id))
+    return _publish(body.load_id, "event", payload, dedup_id_for_event(payload))
 
 
 @router.post(
@@ -139,17 +111,7 @@ async def inbound_communication(body: InboundCommunicationEvent) -> AcceptedResp
 )
 async def tracking_event(body: TrackingEvent) -> AcceptedResponse:
     payload = body.model_dump(mode="json")
-    msg = WorkMessage(
-        load_id=body.load_id,
-        kind="event",
-        payload=payload,
-        dedup_id=dedup_id_for_event(payload),
-    )
-    try:
-        publish_work_item(msg)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return AcceptedResponse(load_id=body.load_id, workflow_id=_workflow_id(body.load_id))
+    return _publish(body.load_id, "event", payload, dedup_id_for_event(payload))
 
 
 @router.post(
@@ -159,14 +121,4 @@ async def tracking_event(body: TrackingEvent) -> AcceptedResponse:
 )
 async def load_update(body: LoadUpdateEvent) -> AcceptedResponse:
     payload = body.model_dump(mode="json")
-    msg = WorkMessage(
-        load_id=body.load_id,
-        kind="event",
-        payload=payload,
-        dedup_id=dedup_id_for_event(payload),
-    )
-    try:
-        publish_work_item(msg)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return AcceptedResponse(load_id=body.load_id, workflow_id=_workflow_id(body.load_id))
+    return _publish(body.load_id, "event", payload, dedup_id_for_event(payload))

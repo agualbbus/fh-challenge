@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import boto3
 
 from app.config import get_settings
-from app.queue.messages import WorkMessage
+from app.queue.messages import WorkMessage, dedup_id_for_timer
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,14 @@ def _sqs_client():
     if settings.aws_endpoint_url:
         kwargs["endpoint_url"] = settings.aws_endpoint_url
     return boto3.client("sqs", **kwargs)
+
+
+def _delay_seconds(fire_at_utc: str) -> int:
+    try:
+        fire_at = datetime.fromisoformat(fire_at_utc.replace("Z", "+00:00"))
+        return max(0, min(900, int((fire_at - datetime.now(timezone.utc)).total_seconds())))
+    except ValueError:
+        return 0
 
 
 def publish_work_item(message: WorkMessage, *, delay_seconds: int = 0) -> None:
@@ -50,24 +58,9 @@ def schedule_timer_message(
     fire_at_utc: str,
 ) -> None:
     """Enqueue a timer work item with SQS delay (max 900s; longer timers use capped delay)."""
-    from app.queue.messages import dedup_id_for_timer
-
-    now = datetime.now(timezone.utc)
-    try:
-        fire_at = datetime.fromisoformat(fire_at_utc.replace("Z", "+00:00"))
-        if fire_at.tzinfo is None:
-            fire_at = fire_at.replace(tzinfo=timezone.utc)
-        delay = max(0, int((fire_at - now).total_seconds()))
-    except ValueError:
-        delay = 0
-
-    if delay > 900:
-        logger.warning(
-            "timer delay %ss exceeds SQS max; capping at 900s timer_id=%s",
-            delay,
-            timer_id,
-        )
-        delay = 900
+    delay = _delay_seconds(fire_at_utc)
+    if delay == 900:
+        logger.warning("timer delay exceeds SQS max; capped at 900s timer_id=%s", timer_id)
 
     msg = WorkMessage(
         load_id=load_id,

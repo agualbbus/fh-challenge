@@ -56,45 +56,23 @@ def _tool_call(name: str, args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _sender_type(event: dict[str, Any]) -> str | None:
+def _inbound(event: dict[str, Any], key: str, default: str = "") -> str:
     if event.get("event_type") != "inbound_communication":
-        return None
-    return event.get("inbound_communication", {}).get("sender_type")
+        return default
+    return event.get("inbound_communication", {}).get(key, default)
 
 
-def _content(event: dict[str, Any]) -> str:
-    if event.get("event_type") != "inbound_communication":
-        return ""
-    return event.get("inbound_communication", {}).get("content", "")
+def _matches(text: str, *keywords: str) -> bool:
+    t = text.lower()
+    return any(k in t for k in keywords)
 
 
-def _channel(event: dict[str, Any]) -> str:
-    if event.get("event_type") != "inbound_communication":
-        return "sms"
-    return event.get("inbound_communication", {}).get("channel", "sms")
-
-
-def _is_load_info_question(content: str) -> bool:
-    text = content.lower()
-    keywords = (
-        "address",
-        "phone",
-        "receiver",
-        "reference",
-        "appointment",
-        "delivery number",
-        "pickup number",
-        "load info",
-        "where am i going",
-        "where do i deliver",
-    )
-    return any(k in text for k in keywords)
-
-
-def _is_operational_issue(content: str) -> bool:
-    text = content.lower()
-    keywords = ("broke down", "breakdown", "accident", "flat tire", "damage", "blocked", "broke")
-    return any(k in text for k in keywords)
+_LOAD_INFO_KEYWORDS = (
+    "address", "phone", "receiver", "reference", "appointment",
+    "delivery number", "pickup number", "load info",
+    "where am i going", "where do i deliver",
+)
+_OPERATIONAL_KEYWORDS = ("broke down", "breakdown", "accident", "flat tire", "damage", "blocked", "broke")
 
 
 def build_mock_responses(
@@ -102,8 +80,7 @@ def build_mock_responses(
     event: dict[str, Any],
 ) -> Iterator[AIMessage]:
     """Map event + load_state to ordered AIMessages for the mock agent loop."""
-    sender = _sender_type(event)
-    if sender == "broker":
+    if _inbound(event, "sender_type") == "broker":
         yield AIMessage(content="Broker message ignored.")
         return
 
@@ -111,15 +88,15 @@ def build_mock_responses(
         yield AIMessage(content="No action for this event type.")
         return
 
-    content = _content(event)
-    channel = _channel(event)
+    content = _inbound(event, "content")
+    channel = _inbound(event, "channel", "sms")
     task = load_state.get("active_task") or "delivery_eta_checkpoint"
     customer_id = load_state.get("customer_id")
     if not customer_id:
         raise ValueError("load_state missing customer_id")
     load_data = load_state.get("load_data", {})
 
-    if _is_load_info_question(content):
+    if _matches(content, *_LOAD_INFO_KEYWORDS):
         field = detect_requested_field(content)
         value = get_load_field(load_data, field)
         tool_calls: list[dict[str, Any]] = [
@@ -181,16 +158,14 @@ def build_mock_responses(
         yield AIMessage(content="Load info question handled.")
         return
 
-    if _is_operational_issue(content) and task == "delivery_eta_checkpoint":
+    if _matches(content, *_OPERATIONAL_KEYWORDS) and task == "delivery_eta_checkpoint":
         tool_calls = [
             _tool_call(
                 "create_issue",
                 {
                     "title": "Operational issue reported",
                     "description": content,
-                    "issue_type": "equipment_failure"
-                    if "broke" in content.lower() or "breakdown" in content.lower()
-                    else "other",
+                    "issue_type": "equipment_failure" if _matches(content, "broke", "breakdown") else "other",
                 },
             ),
         ]
