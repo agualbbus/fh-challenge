@@ -51,7 +51,7 @@ def get_settings() -> Settings:
         model_mode=_env("MODEL_MODE", "mock"),
         openrouter_api_key=or_key if or_key else None,
         openrouter_model_primary=_env(
-            "OPENROUTER_MODEL_PRIMARY", "anthropic/claude-sonnet-latest"
+            "OPENROUTER_MODEL_PRIMARY", "z-ai/glm-5.1"
         ),
         openrouter_model_fallback=_env("OPENROUTER_MODEL_FALLBACK", "z-ai/glm-5.1"),
         openrouter_base_url=_env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),

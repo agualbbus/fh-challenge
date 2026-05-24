@@ -12,12 +12,21 @@ from typing import Any
 
 import httpx
 
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 from evals.assertions import run_case_assertions
 
 FIXTURES_PATH = Path(__file__).resolve().parent / "fixtures" / "test-cases.json"
 REPORT_PATH = Path(__file__).resolve().parent / "EVAL_REPORT.md"
 
-PHASE3_CASES = {"3b_load_question_found", "3c_load_question_missing"}
+MOCK_CASES = {
+    "3b_load_question_found",
+    "3c_load_question_missing",
+    "3d_truck_broken",
+    "3k_broker_email_ignore",
+}
 
 
 def _apply_patch(obj: Any, path: str, value: Any) -> None:
@@ -79,7 +88,8 @@ async def _wait_for_tools(load_id: str, min_count: int, timeout: float = 30.0) -
     last: dict[str, Any] = {}
     while time.monotonic() < deadline:
         last = await _query_load_state(load_id)
-        if len(last.get("tool_calls", [])) >= min_count:
+        milestone = last.get("milestone") or last.get("load_state", {}).get("milestone")
+        if milestone and len(last.get("tool_calls", [])) >= min_count:
             return last
         await asyncio.sleep(0.5)
     return last
@@ -161,7 +171,7 @@ def main() -> int:
     from app.config import get_settings
 
     settings = get_settings()
-    return run_async(run_all(settings.api_base_url, PHASE3_CASES))
+    return run_async(run_all(settings.api_base_url, MOCK_CASES))
 
 
 if __name__ == "__main__":

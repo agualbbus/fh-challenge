@@ -1,7 +1,7 @@
-.PHONY: install dev-api dev-worker test eval sonar-up sonar-scan sonar-test help
+.PHONY: install dev-api dev-worker test coverage eval sonar-up sonar-scan sonar-test help
 
 help:
-	@echo "Targets: install dev-api dev-worker test eval sonar-up sonar-scan sonar-test"
+	@echo "Targets: install dev-api dev-worker test coverage eval sonar-up sonar-scan sonar-test"
 
 install:
 	uv sync
@@ -14,6 +14,9 @@ dev-worker:
 
 test:
 	uv run pytest
+
+coverage:
+	uv run pytest --cov=app --cov-report=term-missing --cov-report=html --cov-report=xml
 
 eval:
 	uv run python evals/run_evals.py

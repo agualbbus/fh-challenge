@@ -27,3 +27,8 @@ dependencies = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=7.1.0",
+]
