@@ -31,6 +31,7 @@ class ToolCallRecord:
 @dataclass
 class AgentDecision:
     state_delta: dict[str, Any] = field(default_factory=dict)
+    active_timers: dict[str, dict[str, Any]] | None = None
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
     timer_ops: list[dict[str, Any]] = field(default_factory=list)
     noop: bool = False

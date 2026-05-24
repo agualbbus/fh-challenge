@@ -7,7 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from langchain.agents import create_agent
+from langchain.agents import AgentState, create_agent
 from langchain.agents.middleware import dynamic_prompt
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -17,12 +17,17 @@ from langgraph.graph import END, START, StateGraph
 from app.customers.base import get_customer_profile
 from app.models.decision import AgentDecision, ToolCallRecord
 from app.queue.messages import WorkMessage
-from app.queue.publisher import schedule_timer_message
 from app.tools.context import current_event_var, load_state_var
 from app.tools.tools import ALL_TOOLS
 from app.worker.llm import get_chat_model
 from app.worker.sops import get_sop_section
 from app.worker.state import LoadGraphState
+
+
+class WatchtowerAgentState(AgentState, total=False):
+    load_state: dict[str, Any]
+    active_timers: dict[str, dict[str, Any]]
+    current_event: dict[str, Any]
 
 
 def _now_iso() -> str:
@@ -52,8 +57,8 @@ def _build_system_prompt(load_state: dict[str, Any], event: dict[str, Any]) -> s
 
 @dynamic_prompt
 def sop_prompt(request) -> str:  # noqa: ANN001
-    load_state = load_state_var.get()
-    event = current_event_var.get()
+    load_state = request.state.get("load_state") or load_state_var.get()
+    event = request.state.get("current_event") or current_event_var.get()
     return _build_system_prompt(load_state, event)
 
 
@@ -63,6 +68,7 @@ def get_agent():
         get_chat_model(),
         tools=ALL_TOOLS,
         middleware=[sop_prompt],
+        state_schema=WatchtowerAgentState,
     )
 
 
@@ -110,32 +116,47 @@ def _extract_tool_records(
 
 async def run_agent_for_event(
     load_state: dict[str, Any],
+    active_timers: dict[str, dict[str, Any]],
     event: dict[str, Any],
 ) -> AgentDecision:
     load_id = load_state.get("load_id", "unknown")
     event_id = event.get("event_id", "unknown")
-    load_state = {**load_state, "_current_event": event}
+    load_state = dict(load_state)
 
     load_token = load_state_var.set(load_state)
     event_token = current_event_var.set(event)
     try:
         agent = get_agent()
         result = await agent.ainvoke(
-            {"messages": [HumanMessage(content=json.dumps(event))]},
+            {
+                "messages": [HumanMessage(content=json.dumps(event))],
+                "load_state": load_state,
+                "active_timers": active_timers,
+                "current_event": event,
+            },
         )
         tool_calls = _extract_tool_records(
             result.get("messages", []),
             load_id=load_id,
             event_id=event_id,
         )
+        state_delta = result.get("load_state") or {}
+        updated_active_timers = result.get("active_timers")
         sop_branch = "agent"
         if not tool_calls:
             return AgentDecision(
+                state_delta=state_delta,
+                active_timers=updated_active_timers,
                 noop=True,
                 reason="agent produced no tool calls",
                 sop_branch=sop_branch,
             )
-        return AgentDecision(tool_calls=tool_calls, sop_branch=sop_branch)
+        return AgentDecision(
+            state_delta=state_delta,
+            active_timers=updated_active_timers,
+            tool_calls=tool_calls,
+            sop_branch=sop_branch,
+        )
     finally:
         load_state_var.reset(load_token)
         current_event_var.reset(event_token)
@@ -158,19 +179,21 @@ def _handle_broker() -> AgentDecision:
 async def route_event(
     load_state: dict[str, Any],
     event: dict[str, Any],
+    active_timers: dict[str, dict[str, Any]] | None = None,
 ) -> AgentDecision:
     sender = _sender_type(event)
     if sender == "broker":
         return _handle_broker()
 
     if event.get("event_type") == "inbound_communication":
-        return await run_agent_for_event(load_state, event)
+        return await run_agent_for_event(load_state, active_timers or {}, event)
 
     return AgentDecision(noop=True, reason="no matching branch", sop_branch="no_action")
 
 
 async def route_work_item(
     load_state: dict[str, Any],
+    active_timers: dict[str, dict[str, Any]],
     work_kind: str,
     payload: dict[str, Any],
 ) -> AgentDecision:
@@ -191,19 +214,21 @@ async def route_work_item(
             sop_branch="timer_fired",
         )
 
-    return await route_event(load_state, payload)
+    return await route_event(load_state, payload, active_timers)
 
 
 @task
 async def _run_agent_task(
     load_state: dict[str, Any],
+    active_timers: dict[str, dict[str, Any]],
     work_kind: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
     """Durable task: agent + tools (replay-safe side effects)."""
-    decision = await route_work_item(load_state, work_kind, payload)
+    decision = await route_work_item(load_state, active_timers, work_kind, payload)
     return {
         "state_delta": decision.state_delta,
+        "active_timers": decision.active_timers,
         "tool_calls": [tc.to_dict() for tc in decision.tool_calls],
         "noop": decision.noop,
         "reason": decision.reason,
@@ -225,52 +250,13 @@ def _apply_decision(
     load_state: dict[str, Any],
     active_timers: dict[str, dict[str, Any]],
     decision: dict[str, Any],
-    load_id: str,
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]], list[dict[str, Any]]]:
     delta = decision.get("state_delta") or {}
     load_state = _merge_load_data(load_state, delta)
+    if decision.get("active_timers") is not None:
+        active_timers = decision["active_timers"]
 
     new_tool_calls: list[dict[str, Any]] = list(decision.get("tool_calls", []))
-    for tc in new_tool_calls:
-        if tc.get("tool") == "update_load_state":
-            new_state = tc.get("result", {}).get("new_state")
-            if new_state:
-                load_state["milestone"] = new_state
-
-        if tc.get("tool") == "create_timer":
-            args = tc.get("arguments", {})
-            result = tc.get("result", {})
-            timer_id = result.get("timer_id", args.get("timer_id", ""))
-            timer_type = args.get("timer_type", "eta_followup")
-            fire_at_utc = args.get("fire_at_utc", "")
-            if timer_id:
-                active_timers[timer_id] = {
-                    "timer_id": timer_id,
-                    "timer_type": timer_type,
-                    "fire_at_utc": fire_at_utc,
-                }
-                schedule_timer_message(
-                    load_id=load_id,
-                    timer_id=timer_id,
-                    timer_type=timer_type,
-                    fire_at_utc=fire_at_utc,
-                )
-
-        elif tc.get("tool") == "cancel_timer":
-            timer_id = tc.get("arguments", {}).get("timer_id", "")
-            active_timers.pop(timer_id, None)
-
-        elif tc.get("tool") == "cancel_timers":
-            timer_type = tc.get("arguments", {}).get("timer_type")
-            if timer_type is None:
-                active_timers.clear()
-            else:
-                active_timers = {
-                    k: v
-                    for k, v in active_timers.items()
-                    if v.get("timer_type") != timer_type
-                }
-
     return load_state, active_timers, new_tool_calls
 
 
@@ -305,10 +291,10 @@ async def process_work_item(state: LoadGraphState) -> LoadGraphState:
     if not load_state:
         load_state = _init_load_state(load_id, {})
 
-    decision = await _run_agent_task(load_state, kind, payload)
+    decision = await _run_agent_task(load_state, active_timers, kind, payload)
 
     load_state, active_timers, new_tool_calls = _apply_decision(
-        load_state, active_timers, decision, load_id
+        load_state, active_timers, decision
     )
 
     return {

@@ -2,17 +2,46 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
-from langchain_core.tools import BaseTool, tool
+from langchain.tools import ToolRuntime, tool
+from langchain_core.messages import ToolMessage
+from langchain_core.tools import BaseTool
+from langgraph.types import Command
 
-from app.worker.load_data import get_load_field
+from app.queue.publisher import schedule_timer_message
 from app.tools.context import current_event_var, load_state_var
+from app.worker.load_data import get_load_field
 
 
 def _ok(**kwargs: Any) -> dict[str, Any]:
     return {"ok": True, **kwargs}
+
+
+def _runtime_load_state(runtime: ToolRuntime) -> dict[str, Any]:
+    return dict(runtime.state.get("load_state") or load_state_var.get() or {})
+
+
+def _runtime_active_timers(runtime: ToolRuntime) -> dict[str, dict[str, Any]]:
+    return dict(runtime.state.get("active_timers") or {})
+
+
+def _tool_message(result: dict[str, Any], runtime: ToolRuntime) -> ToolMessage:
+    return ToolMessage(
+        content=json.dumps(result),
+        tool_call_id=runtime.tool_call_id or "",
+    )
+
+
+def _state_command(result: dict[str, Any], runtime: ToolRuntime, **updates: Any) -> Command:
+    return Command(
+        update={
+            **updates,
+            "messages": [_tool_message(result, runtime)],
+        }
+    )
 
 
 @tool
@@ -46,11 +75,11 @@ def _extract_attachments(event: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 @tool
-def check_attachment(attachment_id: str) -> dict[str, Any]:
+def check_attachment(attachment_id: str, runtime: ToolRuntime) -> dict[str, Any]:
     """Classify an attachment from the current inbound communication."""
     categories = ["other"]
     description = "Unknown attachment"
-    event = current_event_var.get()
+    event = runtime.state.get("current_event") or current_event_var.get()
     for att in _extract_attachments(event):
         if att.get("attachment_id") == attachment_id:
             mock = att.get("mock_classification", {})
@@ -66,11 +95,13 @@ def check_attachment(attachment_id: str) -> dict[str, Any]:
 
 
 @tool
-def update_load_state(target_state: str) -> dict[str, Any]:
+def update_load_state(target_state: str, runtime: ToolRuntime) -> Command:
     """Update the load milestone/state."""
-    load_state = load_state_var.get()
+    load_state = _runtime_load_state(runtime)
     previous = load_state.get("milestone", "on_route_to_delivery")
-    return {"ok": True, "previous_state": previous, "new_state": target_state}
+    updated_load_state = {**load_state, "milestone": target_state}
+    result = {"ok": True, "previous_state": previous, "new_state": target_state}
+    return _state_command(result, runtime, load_state=updated_load_state)
 
 
 @tool
@@ -80,21 +111,49 @@ def update_eta(target_location: str, eta_utc: str) -> dict[str, Any]:
 
 
 @tool
-def create_timer(timer_type: str, fire_at_utc: str, timer_id: str = "") -> dict[str, Any]:
+def create_timer(timer_type: str, fire_at_utc: str, runtime: ToolRuntime, timer_id: str = "") -> Command:
     """Schedule a follow-up timer."""
-    return _ok(timer_id=timer_id or f"timer-{uuid.uuid4()}")
+    load_state = _runtime_load_state(runtime)
+    load_id = load_state.get("load_id", "")
+    resolved_timer_id = timer_id or f"timer-{uuid.uuid4()}"
+    active_timers = _runtime_active_timers(runtime)
+    active_timers[resolved_timer_id] = {
+        "timer_id": resolved_timer_id,
+        "timer_type": timer_type,
+        "fire_at_utc": fire_at_utc,
+    }
+    if load_id:
+        schedule_timer_message(
+            load_id=load_id,
+            timer_id=resolved_timer_id,
+            timer_type=timer_type,
+            fire_at_utc=fire_at_utc,
+        )
+    result = _ok(timer_id=resolved_timer_id)
+    return _state_command(result, runtime, active_timers=active_timers)
 
 
 @tool
-def cancel_timer(timer_id: str) -> dict[str, Any]:
+def cancel_timer(timer_id: str, runtime: ToolRuntime) -> Command:
     """Cancel a single timer by id."""
-    return _ok()
+    active_timers = _runtime_active_timers(runtime)
+    active_timers.pop(timer_id, None)
+    return _state_command(_ok(), runtime, active_timers=active_timers)
 
 
 @tool
-def cancel_timers(timer_type: str | None = None) -> dict[str, Any]:
+def cancel_timers(runtime: ToolRuntime, timer_type: str | None = None) -> Command:
     """Cancel timers, optionally filtered by timer_type."""
-    return _ok()
+    active_timers = _runtime_active_timers(runtime)
+    if timer_type is None:
+        active_timers = {}
+    else:
+        active_timers = {
+            timer_id: timer
+            for timer_id, timer in active_timers.items()
+            if timer.get("timer_type") != timer_type
+        }
+    return _state_command(_ok(), runtime, active_timers=active_timers)
 
 
 @tool
@@ -110,9 +169,9 @@ def create_issue(title: str, description: str, issue_type: str) -> dict[str, Any
 
 
 @tool
-def get_load_info(field: str) -> dict[str, Any]:
+def get_load_info(field: str, runtime: ToolRuntime) -> dict[str, Any]:
     """Read a field from the current load data."""
-    load_state = load_state_var.get()
+    load_state = _runtime_load_state(runtime)
     load_data = load_state.get("load_data", {})
     value = get_load_field(load_data, field)
     if value:
@@ -127,9 +186,9 @@ def validate_eta(eta_utc: str, target_location: str = "delivery") -> dict[str, A
 
 
 @tool
-def get_appointment_time(stop_type: str) -> dict[str, Any]:
+def get_appointment_time(stop_type: str, runtime: ToolRuntime) -> dict[str, Any]:
     """Get appointment details for a pickup or delivery stop."""
-    load_state = load_state_var.get()
+    load_state = _runtime_load_state(runtime)
     load_data = load_state.get("load_data", {})
     for stop in load_data.get("stops", []):
         if stop.get("type") == stop_type:
