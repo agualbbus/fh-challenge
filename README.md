@@ -82,6 +82,10 @@ See [infra/README.md](infra/README.md) for Temporal namespace setup, AWS skeleto
 | `make dev-worker` | Temporal worker |
 | `make test` | pytest |
 | `make eval` | Eval harness (Phase 2+) |
+| `make sonar-up` | Local SonarQube CE on :9000 |
+| `make sonar-scan` | SonarScanner (needs `SONAR_TOKEN` in `.env`) |
+
+Optional static analysis: [docs/SONARQUBE.md](docs/SONARQUBE.md) (branch `feat/sonarqube` worktree).
 
 ## Project layout
 
