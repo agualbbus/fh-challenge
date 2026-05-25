@@ -8,6 +8,7 @@ from langgraph.func import task
 
 from app.worker.agent import route_event
 from app.worker.merge import init_load_state, merge_load_data
+from app.worker.sops import task_for_milestone
 from app.worker.state import LoadGraphState
 
 KIND_TO_NODE = {"seed": "seed", "task": "task", "timer": "timer", "event": "event"}
@@ -19,7 +20,9 @@ def select_branch(state: LoadGraphState) -> str:
 
 
 def seed_node(state: LoadGraphState) -> dict[str, Any]:
-    payload = state.get("payload") or {}
+    payload = dict(state.get("payload") or {})
+    if "active_task" not in payload:
+        payload["active_task"] = task_for_milestone(payload.get("milestone"))
     return {"load_state": init_load_state(state.get("load_id", ""), payload)}
 
 

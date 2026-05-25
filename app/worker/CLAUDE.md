@@ -89,7 +89,7 @@ flowchart TD
     event --> END
 ```
 
-The conditional edge from `START` (`select_branch`) dispatches on `state["kind"]`: `seed` initializes `load_state`, `task` sets `active_task`, `timer` is a noop placeholder for Phase 4+, and `event` invokes the agent through the durable `@task`-wrapped `_invoke_agent`. Inside `route_event`, broker messages short-circuit before the LLM and supported inbound communications enter `run_agent_for_event`.
+The conditional edge from `START` (`select_branch`) dispatches on `state["kind"]`: `seed` initializes `load_state` and sets `active_task` from the seed's `milestone` via `sops.task_for_milestone`, `task` (from `POST /submit-task`) overrides `active_task` explicitly, `timer` is a noop placeholder for Phase 4+, and `event` invokes the agent through the durable `@task`-wrapped `_invoke_agent`. Inside `route_event`, broker messages short-circuit before the LLM and supported inbound communications enter `run_agent_for_event`.
 
 ## Agent Stack
 
@@ -140,7 +140,8 @@ Tests and evals read checkpoints through [`query_load_state`](graph.py), includi
 | Context vars | `load_state_var` and `current_event_var` pass hidden state to tools and the mock. | LangChain tool schemas should stay simple and match challenge-facing tool inputs. |
 | Broker guard | Broker inbound communications short-circuit before the agent. | This is a locked design decision; the event is still accepted by the API. |
 | Tool call recording | `tool_extraction.extract_tool_records` parses model/tool messages and stores records in `tool_calls`. | Evals assert the trajectory from Postgres state, not only from LangSmith traces. |
-| SOP prompt slice | The prompt injects the `load_information_question` section today. | The current implementation is a Phase 3 slice; the full SOP files remain in [`../sops/`](../sops/). |
+| SOP prompt | The prompt is built section-by-section (`_intro`, `_routing_rules`, `_header_block`, `_customer_block`, `_sop_block`, `_state_and_event_block`, `_output_contract` in `agent.py`) and injects the full active-task SOP plus the full `CustomerProfile` JSON. The agent emits `SOP_BRANCH:` / `RATIONALE:` lines for trace observability; `active_task` must be set on `load_state` (no silent default) or prompt construction raises. | The agent picks the branch; Python no longer pre-selects one. |
+| SOP selection | `task_for_milestone(milestone)` in `sops.py` maps `on_route_to_delivery → delivery_eta_checkpoint` and `at_delivery/delivered/pod_collected → confirm_delivery`. Applied in `seed_node`; overridable by `/submit-task`. | Fixtures choose the SOP via `initial_state` without needing a separate task submission. |
 | Narrow event routing | Unsupported event types return `noop` with `sop_branch=no_action`. | Phase 4+ fixtures are still pending. |
 | Timer branch | `kind=timer` returns `noop` with `sop_branch=timer_fired`. | ETA follow-up agent behavior has not been implemented yet. |
 | Task branch | `kind=task` only sets `active_task`. | Task submission activates the workflow but does not yet trigger a separate agent decision. |

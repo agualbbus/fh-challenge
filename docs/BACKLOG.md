@@ -21,7 +21,7 @@ Kickoff backlog derived from [implementation-spec.md](research/implementation-sp
 - [x] `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`
 - [x] `.cursor/rules/watchtower.mdc`
 - [x] ChatOpenRouter + `MODEL_MODE=mock` fixture LLM in `app/worker/mock_model.py`
-- [ ] Load all sections of the active task's SOP into the system prompt (replace single-section slice in `build_system_prompt`), letting the agent pick the branch instead of hard-coding `load_information_question`
+- [x] Load all sections of the active task's SOP into the system prompt (replace single-section slice in `build_system_prompt`), letting the agent pick the branch instead of hard-coding `load_information_question`
 - [ ] Verify one trace in LangSmith UI; save URL to `docs/evidence/` (set env vars directly)
 
 ## Phase 3 — First feature
@@ -42,7 +42,10 @@ Kickoff backlog derived from [implementation-spec.md](research/implementation-sp
 - [ ] `3h_fresh_tracking_three_pings_in_geofence`
 - [ ] `3i_not_tracking_driver_says_arrived`
 - [ ] `3j_not_tracking_driver_sends_pod`
-- [ ] Confirm delivery + lumper branches (Customer C `forward_email`)
+- [x] Confirm delivery selectable by milestone (`seed_node` → `task_for_milestone`)
+- [x] Customer C lumper config: `forward_email` + `review_task_fallback` + `enforce_pod_handling`
+- [x] Per-customer `first_arrival_message` templates in YAML
+- [ ] Confirm-delivery fixtures (visible cases all start `on_route_to_delivery`; SOP wired but unexercised by visible tests)
 
 ## Submission
 
