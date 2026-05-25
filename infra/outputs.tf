@@ -23,3 +23,8 @@ output "database_url_hint" {
   value       = var.enable_aws_resources ? "postgresql://${var.db_username}:<password>@${aws_db_instance.watchtower[0].address}:${aws_db_instance.watchtower[0].port}/${var.db_name}" : null
   sensitive   = true
 }
+
+output "github_deploy_role_arn" {
+  description = "IAM role ARN for GitHub Actions OIDC deploy (set as AWS_DEPLOY_ROLE_ARN repo secret)."
+  value       = var.enable_aws_resources ? aws_iam_role.github_deploy[0].arn : null
+}

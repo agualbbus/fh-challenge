@@ -12,6 +12,7 @@ FreightHero Watchtower is a thin HTTP API over **SQS FIFO** and **LangGraph** wi
 | PostgreSQL | `AsyncPostgresSaver` checkpoint store |
 | Customer YAML | Declarative A/B/C behavior via `CustomerProfile` |
 | LangSmith (optional) | Traces when `LANGCHAIN_TRACING_V2=true` |
+| CI/CD (AWS) | GitHub Actions OIDC → ECR → ECS force deploy on `main` |
 
 ## Request flow
 
@@ -32,6 +33,6 @@ FreightHero Watchtower is a thin HTTP API over **SQS FIFO** and **LangGraph** wi
 
 - Confirm-delivery branches beyond first slice (Phase 4+).
 - Timer-fired agent branches return noop until ETA follow-up cases are implemented.
-- ECS task definitions deferred until local evals pass.
+- Live deploy evidence and full fixture pass against the public endpoint still pending.
 
 See [research/implementation-spec.md](research/implementation-spec.md) for full detail.

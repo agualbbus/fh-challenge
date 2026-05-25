@@ -1,0 +1,50 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+      ECR_REPO: freight-watchtower
+      ECS_CLUSTER: freight-watchtower
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          SHA: ${{ github.sha }}
+        run: |
+          IMAGE=$REGISTRY/$ECR_REPO
+          docker build -t $IMAGE:$SHA -t $IMAGE:latest .
+          docker push $IMAGE:$SHA
+          docker push $IMAGE:latest
+
+      - name: Force new ECS deployments
+        run: |
+          aws ecs update-service --cluster $ECS_CLUSTER \
+            --service freight-watchtower-api --force-new-deployment >/dev/null
+          aws ecs update-service --cluster $ECS_CLUSTER \
+            --service freight-watchtower-worker --force-new-deployment >/dev/null
+
+      - name: Wait for services to stabilize
+        run: |
+          aws ecs wait services-stable --cluster $ECS_CLUSTER \
+            --services freight-watchtower-api freight-watchtower-worker

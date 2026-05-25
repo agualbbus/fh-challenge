@@ -46,6 +46,7 @@ Kickoff backlog derived from [implementation-spec.md](research/implementation-sp
 
 ## Submission
 
+- [x] GitHub Actions OIDC deploy to ECR + ECS (`main` push)
 - [ ] Deploy to AWS; capture public API URL
 - [ ] Run evals against deployed endpoint; save log/trace evidence
 - [ ] Write `AI_USAGE.md` and finalize `evals/EVAL_REPORT.md`
