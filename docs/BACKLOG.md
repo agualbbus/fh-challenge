@@ -20,7 +20,7 @@ Kickoff backlog derived from [implementation-spec.md](research/implementation-sp
 - [x] `evals/run_evals.py` + `evals/assertions.py`
 - [x] `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`
 - [x] `.cursor/rules/watchtower.mdc`
-- [x] ChatOpenRouter + `MODEL_MODE=mock` fixture LLM in `app/worker/mock_model.py`
+- [x] ChatOpenRouter chat model in `app/worker/llm.py`
 - [x] Load all sections of the active task's SOP into the system prompt (replace single-section slice in `build_system_prompt`), letting the agent pick the branch instead of hard-coding `load_information_question`
 - [ ] Verify one trace in LangSmith UI; save URL to `docs/evidence/` (set env vars directly)
 

@@ -22,7 +22,7 @@ FreightHero Watchtower is a thin HTTP API over **SQS FIFO** and **LangGraph** wi
 
 ## Design decisions
 
-- **Agent:** LangChain `create_agent` with SOP system prompt; `MODEL_MODE=mock` uses fixture mock LLM (no OpenRouter in CI).
+- **Agent:** LangChain `create_agent` with SOP system prompt over OpenRouter. The agent's final answer is a JSON object (`summary`, `sop`, `rationale`) parsed by `PydanticOutputParser`.
 - **Durable execution:** LangGraph `@task` wraps agent decisions; `durability="sync"` on invoke.
 - **Eval source of truth:** Checkpointed `tool_calls` + `milestone` in Postgres.
 - **Timers:** `create_timer` schedules delayed SQS message (`kind=timer`); max 900s delay on SQS (EventBridge for longer in AWS).

@@ -2,13 +2,7 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
-
-# Force the deterministic mock LLM for the whole unit-test session so router/graph
-# tests do not depend on a live OpenRouter call or the developer's local .env.
-os.environ["MODEL_MODE"] = "mock"
 
 
 @pytest.fixture

@@ -24,8 +24,10 @@ def assert_tool_called(
         raise AssertionError(f"Required tool not called: {tool}")
 
     if contains is not None:
-        haystack = str(matches)
-        if contains not in haystack:
+        # Case-insensitive so SOP-driven wording ("Checking on...") still matches
+        # fixture substrings like "checking".
+        haystack = str(matches).lower()
+        if contains.lower() not in haystack:
             raise AssertionError(
                 f"Tool {tool} calls did not contain {contains!r}: {matches}"
             )

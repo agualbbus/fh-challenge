@@ -22,10 +22,9 @@ Entrypoint flow: [`__main__.py`](__main__.py) calls [`main.py`](main.py), which 
 | [`agent.py`](agent.py) | `build_agent` (`create_agent` factory), `sop_prompt` dynamic prompt, `WatchtowerAgentState`, `run_agent_for_event`, and the `route_event` broker guard. |
 | [`tool_extraction.py`](tool_extraction.py) | Pure `extract_tool_records` — pairs `AIMessage.tool_calls` with their `ToolMessage` results into `ToolCallRecord`s. |
 | [`merge.py`](merge.py) | Pure helpers: `init_load_state` and `merge_load_data` (top-level merge, one level deep into `load_data`). |
-| [`llm.py`](llm.py) | Select the chat model: OpenRouter for live runs or the fixture mock model for `MODEL_MODE=mock`. |
-| [`mock_model.py`](mock_model.py) | Deterministic fixture LLM that emits tool calls from keyword and customer-profile rules. |
+| [`llm.py`](llm.py) | Build the `ChatOpenRouter` chat model for `create_agent`. Tests monkeypatch `get_chat_model`. |
 | [`sops.py`](sops.py) | Load branch-scoped SOP markdown sections from [`../sops/`](../sops/). |
-| [`load_data.py`](load_data.py) | Detect requested load fields and format load data for tools and the mock model. |
+| [`load_data.py`](load_data.py) | Detect requested load fields and format load data for tools. |
 
 Related modules this worker depends on:
 
@@ -101,9 +100,7 @@ flowchart LR
         runAgent --> buildAgent["build_agent create_agent"]
     end
     subgraph llmLayer [llm.py]
-        buildAgent --> modeCheck{MODEL_MODE}
-        modeCheck -->|mock| mockModel["mock_model.build_mock_model"]
-        modeCheck -->|live| openRouter["ChatOpenRouter"]
+        buildAgent --> openRouter["ChatOpenRouter"]
     end
     subgraph promptLayer [sops.py + customers]
         buildAgent --> sopPrompt["@dynamic_prompt sop_prompt"]
@@ -114,7 +111,7 @@ flowchart LR
     runAgent --> extract["tool_extraction.extract_tool_records to checkpoint"]
 ```
 
-`run_agent_for_event` sets context variables before building the agent (the live prompt path reads `load_state` / `current_event` straight from `request.state`; ContextVars stay only because the mock LLM factory in `llm.py` and stateful tools read them). The dynamic prompt reads load state, the current event, customer profile settings, and a branch-specific SOP section. `llm.py` chooses a live OpenRouter model or the deterministic mock. Tool calls are recovered from `AIMessage` and `ToolMessage` pairs by `tool_extraction.extract_tool_records` and appended to checkpoint state.
+`run_agent_for_event` sets context variables before building the agent (the dynamic prompt reads `load_state` / `current_event` straight from `request.state`; ContextVars stay so stateful tools can read load/event state without it appearing on tool schemas). The dynamic prompt emits XML-tagged sections (`<role>`, `<routing_rules>`, `<context>`, `<customer_profile>`, `<sop>`, `<load_state>`, `<incoming_event>`, `<examples>`, `<output_contract>`) and instructs the agent to return a JSON object parsed by `PydanticOutputParser` into `AgentResponse(summary, rationale)`. Tool calls are recovered from `AIMessage` / `ToolMessage` pairs by `tool_extraction.extract_tool_records` and appended to checkpoint state.
 
 ## Checkpoint State
 
@@ -136,20 +133,28 @@ Tests and evals read checkpoints through [`query_load_state`](graph.py), includi
 | --- | --- | --- |
 | Decoupled API | API routes only publish SQS work; the worker is the only graph caller. | The rubric expects async processing and `202 Accepted` write APIs. |
 | Mocked tools | Side-effect tools return `{ok: true, ...}` plus synthetic IDs. | The take-home should not need Twilio, Slack, email, or TMS credentials. |
-| `MODEL_MODE=mock` | `MockToolCallingModel` emits deterministic tool calls from keyword rules. | CI and fixture evals must run without OpenRouter and without model nondeterminism. |
-| Context vars | `load_state_var` and `current_event_var` pass hidden state to tools and the mock. | LangChain tool schemas should stay simple and match challenge-facing tool inputs. |
+| Context vars | `load_state_var` and `current_event_var` pass hidden state to stateful tools. | LangChain tool schemas should stay simple and match challenge-facing tool inputs. |
 | Broker guard | Broker inbound communications short-circuit before the agent. | This is a locked design decision; the event is still accepted by the API. |
 | Tool call recording | `tool_extraction.extract_tool_records` parses model/tool messages and stores records in `tool_calls`. | Evals assert the trajectory from Postgres state, not only from LangSmith traces. |
-| SOP prompt | The prompt is built section-by-section (`_intro`, `_routing_rules`, `_header_block`, `_customer_block`, `_sop_block`, `_state_and_event_block`, `_output_contract` in `agent.py`) and injects the full active-task SOP plus the full `CustomerProfile` JSON. The agent emits `SOP_BRANCH:` / `RATIONALE:` lines for trace observability; `active_task` must be set on `load_state` (no silent default) or prompt construction raises. | The agent picks the branch; Python no longer pre-selects one. |
+| SOP prompt | The prompt is built section-by-section (`_role_block`, `_routing_rules_block`, `_context_block`, `_format_customer_profile`, `_sop_block`, `_load_state_block`, `_event_block`, `_examples_block`, `_output_contract_block` in `agent.py`) using XML-style tags around each section, with the customer profile rendered as a bullet list and the full active-task SOP markdown inside `<sop>...</sop>`. The agent must first call tools and then end with one plain-text message of the form `SUMMARY: ...` / `RATIONALE: ...`; `parse_final_answer` extracts both via regex from the last `AIMessage`. We deliberately do NOT bind `response_format=` to `create_agent` because that pulls models straight to the structured output and skips the tool loop. `active_task` must be set on `load_state` (no silent default) or prompt construction raises. | The agent picks the SOP section; Python no longer pre-selects one. |
 | SOP selection | `task_for_milestone(milestone)` in `sops.py` maps `on_route_to_delivery → delivery_eta_checkpoint` and `at_delivery/delivered/pod_collected → confirm_delivery`. Applied in `seed_node`; overridable by `/submit-task`. | Fixtures choose the SOP via `initial_state` without needing a separate task submission. |
-| Narrow event routing | Unsupported event types return `noop` with `sop_branch=no_action`. | Phase 4+ fixtures are still pending. |
-| Timer branch | `kind=timer` returns `noop` with `sop_branch=timer_fired`. | ETA follow-up agent behavior has not been implemented yet. |
+| Narrow event routing | Unsupported event types return `noop` with `sop=no_action`. | Phase 4+ fixtures are still pending. |
+| Timer branch | `kind=timer` returns `noop` (no agent invocation). | ETA follow-up agent behavior has not been implemented yet. |
 | Task branch | `kind=task` only sets `active_task`. | Task submission activates the workflow but does not yet trigger a separate agent decision. |
 | SQS timer cap | Timer scheduling uses delayed SQS messages. | SQS delay tops out at 900 seconds; production should use EventBridge for longer delays. |
 | Graph per message | `process_work_message` builds the compiled graph for each message. | This keeps the take-home simple and is acceptable at this scale. |
 | No read API | `query_load_state` is for tests/evals only. | The challenge exposes write endpoints; evals inspect checkpoints directly. |
 
-When adding a new fixture branch, update the relevant routing code, `mock_model.py`, tools if needed, and eval fixtures together. The live prompt/agent path and mock path are parallel behavior surfaces; keep them aligned.
+When adding a new fixture branch, update the relevant routing code, any new tools, and the eval fixtures together (and refresh the few-shot examples in `agent.py` if the new branch needs one). There is no mock LLM module — tests stub `get_chat_model` per-test.
+
+## Error Handling Boundaries
+
+| Layer | Behavior on failure |
+| --- | --- |
+| `consumer.py` | Poison messages (bad JSON / missing keys) are deleted from SQS; handler exceptions leave the message in flight so SQS redelivers and eventually DLQs after max-receive-count. |
+| `process_work_message` | Logs `load_id`/`kind` on entry and on exception, then re-raises so the consumer can apply the retry/DLQ policy above. |
+| `event_node` | If `load_state` is missing `customer_id` or `active_task` (event arrived before seed), records a noop `AgentDecision` instead of letting `build_system_prompt` raise. |
+| `run_agent_for_event` | Any exception from `agent.ainvoke` or `extract_tool_records` is caught, logged, and converted into a noop `AgentDecision` with the error class + message in `reason`, so the checkpoint advances and the SQS message can be acked. |
 
 ## Environment And Local Runs
 
@@ -159,8 +164,7 @@ Minimum local dependencies:
 
 - PostgreSQL for LangGraph checkpoints.
 - ElasticMQ or SQS for FIFO work items.
-- `.env` values for `DATABASE_URL`, `SQS_QUEUE_URL`, and `MODEL_MODE`.
-- `MODEL_MODE=mock` for evals; `MODEL_MODE=live` plus `OPENROUTER_API_KEY` for live LLM runs.
+- `.env` values for `DATABASE_URL`, `SQS_QUEUE_URL`, and `OPENROUTER_API_KEY`.
 
 Useful commands:
 
@@ -174,10 +178,10 @@ The eval harness expects the API, worker, Postgres, and SQS/ElasticMQ to be runn
 
 ## Testing Pointers
 
-Look at [`../../tests/test_graph.py`](../../tests/test_graph.py) for focused graph coverage: seed state, broker noop behavior, and mock-model tool calls read through `query_load_state`.
+Look at [`../../tests/test_graph.py`](../../tests/test_graph.py) for focused graph coverage: it monkeypatches `app.worker.llm.get_chat_model` with `tests/_llm_stub.ScriptedChatModel` to exercise the seed and event flow and reads results through `query_load_state`.
 
 For higher-level workflow expectations, use [`../../docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md), [`../../docs/research/implementation-spec.md`](../../docs/research/implementation-spec.md), and the challenge files under [`../../challenge-specs/`](../../challenge-specs/).
 
 ## Keep In Sync
 
-Update this file when changing routing branches, checkpoint fields, mock-model branches, SOP prompt selection, or worker layer boundaries. If a change affects system-wide decisions, also update [`../../CLAUDE.md`](../../CLAUDE.md).
+Update this file when changing routing branches, checkpoint fields, SOP prompt structure, the plain-text final-answer contract (currently `SUMMARY:` / `RATIONALE:` parsed by `parse_final_answer`), or worker layer boundaries. If a change affects system-wide decisions, also update [`../../CLAUDE.md`](../../CLAUDE.md).

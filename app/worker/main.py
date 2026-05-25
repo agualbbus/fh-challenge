@@ -22,10 +22,9 @@ async def main() -> None:
     checkpointer = await init_checkpointer(settings.database_url)
 
     logger.info(
-        "Worker ready queue=%s db=%s model_mode=%s",
+        "Worker ready queue=%s db=%s",
         settings.sqs_queue_url,
         settings.database_url.split("@")[-1],
-        settings.model_mode,
     )
 
     try:

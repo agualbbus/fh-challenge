@@ -93,7 +93,6 @@ locals {
 
   common_env = [
     { name = "AWS_REGION", value = var.aws_region },
-    { name = "MODEL_MODE", value = var.model_mode },
   ]
 
   worker_env = concat(local.common_env, [

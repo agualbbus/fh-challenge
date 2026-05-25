@@ -122,6 +122,10 @@ async def run_case(
         event_payload = copy.deepcopy(event)
         event_payload["load_id"] = load_id
         event_payload["customer_id"] = seed["customer_id"]
+        # Suffix event_id with run_id so SQS FIFO dedup (5-min window) does not
+        # swallow repeat eval runs that reuse fixture event_ids.
+        if event_payload.get("event_id"):
+            event_payload["event_id"] = f"{event_payload['event_id']}-{run_id}"
         path = {
             "inbound_communication": "/events/inbound-communication",
             "tracking": "/events/tracking",

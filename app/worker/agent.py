@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -18,7 +19,47 @@ from app.worker.llm import get_chat_model
 from app.worker.sops import get_sop_document
 from app.worker.tool_extraction import extract_tool_records
 
-_SOP_BRANCH_RE = re.compile(r"SOP_BRANCH:\s*([A-Za-z0-9_\-]+)")
+logger = logging.getLogger(__name__)
+
+# Plain-text final-answer markers. We avoid `response_format=` because binding
+# a Pydantic schema makes the model skip the tool loop on most providers.
+_SUMMARY_RE = re.compile(r"^\s*SUMMARY\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+_RATIONALE_RE = re.compile(r"^\s*RATIONALE\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def _message_text(msg: Any) -> str:
+    content = getattr(msg, "content", "")
+    if isinstance(content, str):
+        return content
+    # Some providers (e.g. Anthropic) return a list of content blocks.
+    parts: list[str] = []
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict):
+                text = block.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+            elif isinstance(block, str):
+                parts.append(block)
+    return "\n".join(parts)
+
+
+def parse_final_answer(messages: list[Any]) -> tuple[str, str]:
+    """Pull `SUMMARY:` and `RATIONALE:` from the last AIMessage text content."""
+    for msg in reversed(messages):
+        if not isinstance(msg, AIMessage):
+            continue
+        text = _message_text(msg)
+        if not text:
+            continue
+        summary_match = _SUMMARY_RE.search(text)
+        rationale_match = _RATIONALE_RE.search(text)
+        if summary_match or rationale_match:
+            return (
+                summary_match.group(1).strip() if summary_match else "",
+                rationale_match.group(1).strip() if rationale_match else "",
+            )
+    return "", ""
 
 
 class WatchtowerAgentState(AgentState, total=False):
@@ -27,54 +68,123 @@ class WatchtowerAgentState(AgentState, total=False):
     current_event: dict[str, Any]
 
 
-def _intro() -> str:
+def _role_block() -> str:
     return (
+        "<role>\n"
         "You are FreightHero Watchtower, an AI agent for freight load operations.\n"
-        "Use the SOP below to pick the correct branch for the incoming event and act with tools."
+        "Use the SOP below to pick the correct section for the incoming event and act with tools.\n"
+        "</role>"
     )
 
 
-def _routing_rules() -> str:
+def _routing_rules_block() -> str:
     return (
-        "Routing rules:\n"
-        "- Read the SOP's Event Routing section first and select the single branch that fits the event.\n"
-        "- Apply the customer profile expectations that are relevant to that branch only.\n"
+        "<routing_rules>\n"
+        "- Read the SOP's Event Routing section first and select the single section that fits the event.\n"
+        "- Apply the customer profile expectations that are relevant to that section only.\n"
         "- Do not invent missing load information. Keep driver-facing messages short and operational.\n"
         "- Match the inbound channel for driver-facing replies unless the customer workflow says otherwise.\n"
-        "- Do not call tools that the chosen branch does not authorize."
+        "- Do not call tools that the chosen section does not authorize.\n"
+        "</routing_rules>"
     )
 
 
-def _header_block(customer_id: str, task: str, milestone: str) -> str:
+def _context_block(customer_id: str, task: str, milestone: str) -> str:
     return (
-        f"Customer: {customer_id}\n"
-        f"Active task: {task}\n"
-        f"Milestone: {milestone}"
+        "<context>\n"
+        f"- customer_id: {customer_id}\n"
+        f"- active_task: {task}\n"
+        f"- milestone: {milestone}\n"
+        "</context>"
     )
 
 
-def _customer_block(profile: CustomerProfile) -> str:
-    return f"Customer profile:\n{json.dumps(profile.model_dump(), indent=2)}"
+def _format_customer_profile(profile: CustomerProfile) -> str:
+    pod = profile.pod
+    pod_bits = [f"{pod.validation} validation"]
+    if pod.notify_on_received:
+        pod_bits.append("notify on received")
+    if pod.notify_delivered_without_pod:
+        pod_bits.append("notify if delivered without POD")
+    pod_line = "; ".join(pod_bits)
+
+    mli = profile.missing_load_info
+    mli_bits: list[str] = []
+    mli_bits.append("create internal task" if mli.create_task else "do not create task")
+    mli_bits.append(
+        f"notify Slack (audience: {mli.slack_audience})"
+        if mli.notify_slack
+        else f"do not notify Slack (audience: {mli.slack_audience})"
+    )
+    mli_line = "; ".join(mli_bits)
+
+    return (
+        f"<customer_profile customer_id=\"{profile.customer_id}\">\n"
+        f"- Escalation channels: {', '.join(profile.escalation.channels)}\n"
+        f"- Delivery geofence radius: {profile.geofence_radius_miles} miles\n"
+        f"- ETA follow-up cadence: every {profile.eta_followup_minutes} minutes\n"
+        f"- POD: {pod_line}\n"
+        f"- Missing load info: {mli_line}\n"
+        f"- Lumper handling: {profile.lumper.mode}\n"
+        f"- First arrival message key: {profile.first_arrival_message}\n"
+        "</customer_profile>"
+    )
 
 
 def _sop_block(task: str) -> str:
     sop = get_sop_document(task)
-    return f"SOP ({task}):\n{sop or '(no SOP loaded)'}"
+    return f"<sop task=\"{task}\">\n{sop or '(no SOP loaded)'}\n</sop>"
 
 
-def _state_and_event_block(load_state: dict[str, Any], event: dict[str, Any]) -> str:
+def _load_state_block(load_state: dict[str, Any]) -> str:
+    return f"<load_state>\n{json.dumps(load_state, indent=2)}\n</load_state>"
+
+
+def _event_block(event: dict[str, Any]) -> str:
+    return f"<incoming_event>\n{json.dumps(event, indent=2)}\n</incoming_event>"
+
+
+def _examples_block() -> str:
     return (
-        f"Current load state:\n{json.dumps(load_state, indent=2)}\n\n"
-        f"Incoming event:\n{json.dumps(event, indent=2)}"
+        "<examples>\n"
+        "Example 1 — Driver asks for delivery address (SMS):\n"
+        "- Tool call: get_load_info(field=\"delivery_address\")\n"
+        "- Tool call: send_sms(recipient=\"driver\", message=\"456 Delivery St, Dallas, TX 75201\")\n"
+        "- Final message after tools:\n"
+        "  SUMMARY: Replied to driver with delivery address by SMS.\n"
+        "  RATIONALE: Driver asked for delivery address; value was in load_data.\n"
+        "\n"
+        "Example 2 — Driver provides ETA \"ETA 3pm\" (SMS):\n"
+        "- Tool call: record_eta(eta=\"15:00\", timezone=\"America/Chicago\")\n"
+        "- Tool call: send_sms(recipient=\"driver\", message=\"Got it — ETA 3pm noted.\")\n"
+        "- Final message after tools:\n"
+        "  SUMMARY: Recorded driver ETA of 15:00 local and acknowledged on SMS.\n"
+        "  RATIONALE: Driver provided usable ETA; recorded and acknowledged per SOP.\n"
+        "\n"
+        "Example 3 — Driver reports breakdown (SMS):\n"
+        "- Tool call: create_issue(title=\"Operational issue reported\", description=\"truck broke down\", issue_type=\"equipment_failure\")\n"
+        "- Tool call: send_sms(recipient=\"driver\", message=\"Thanks — the team will review this shortly.\")\n"
+        "- Final message after tools:\n"
+        "  SUMMARY: Logged breakdown as operational issue and acknowledged driver on SMS.\n"
+        "  RATIONALE: Driver reported equipment failure; SOP requires logging + brief ack.\n"
+        "</examples>"
     )
 
 
-def _output_contract() -> str:
+def _output_contract_block() -> str:
     return (
-        "After your tool calls, end your final message with exactly two lines:\n"
-        "SOP_BRANCH: <branch_key e.g. operational_issue, load_information_question, "
-        "driver_provides_eta, arrival_confirmation, tracking_ping, broker_messages, no_action>\n"
-        "RATIONALE: <one short line>"
+        "<output_contract>\n"
+        "Process the event in two phases:\n"
+        "1. CALL TOOLS first. Execute every tool needed to satisfy the SOP for the "
+        "selected section (record data, notify channels, create tasks/issues, "
+        "manage timers). Do NOT skip the tool phase.\n"
+        "2. AFTER all tool calls are complete, return ONE final assistant message "
+        "containing exactly two lines and nothing else:\n"
+        "   SUMMARY: <one sentence describing what you did this turn>\n"
+        "   RATIONALE: <one short line explaining why that fits the SOP>\n"
+        "Do not wrap these lines in JSON, code fences, or extra prose. The labels "
+        "SUMMARY: and RATIONALE: are parsed by regex downstream.\n"
+        "</output_contract>"
     )
 
 
@@ -91,13 +201,15 @@ def build_system_prompt(load_state: dict[str, Any], event: dict[str, Any]) -> st
     milestone = load_state.get("milestone", "on_route_to_delivery")
     return "\n\n".join(
         [
-            _intro(),
-            _routing_rules(),
-            _header_block(customer_id, task, milestone),
-            _customer_block(profile),
+            _role_block(),
+            _routing_rules_block(),
+            _context_block(customer_id, task, milestone),
+            _format_customer_profile(profile),
             _sop_block(task),
-            _state_and_event_block(load_state, event),
-            _output_contract(),
+            _load_state_block(load_state),
+            _event_block(event),
+            _examples_block(),
+            _output_contract_block(),
         ]
     )
 
@@ -124,7 +236,7 @@ async def run_agent_for_event(
     active_timers: dict[str, dict[str, Any]],
     event: dict[str, Any],
 ) -> AgentDecision:
-    """Invoke the agent for one event; ContextVars feed mock LLM + stateful tools."""
+    """Invoke the agent for one event; ContextVars feed stateful tools."""
     load_id = load_state.get("load_id", "unknown")
     event_id = event.get("event_id", "unknown")
 
@@ -140,31 +252,65 @@ async def run_agent_for_event(
                 "current_event": event,
             },
         )
+    except Exception as exc:
+        # Surface a structured failure rather than crashing the graph. SQS
+        # will retry on transport errors, but LLM/output-parser failures are
+        # often deterministic — recording the error in the checkpoint lets
+        # the message be acknowledged and inspected.
+        logger.exception(
+            "Agent invocation failed load_id=%s event_id=%s",
+            load_id,
+            event_id,
+        )
+        return AgentDecision(
+            noop=True,
+            reason=f"agent invocation error: {type(exc).__name__}: {exc}",
+            summary="No action.",
+            rationale="agent invocation raised an exception",
+        )
     finally:
         load_state_var.reset(load_token)
         current_event_var.reset(event_token)
 
     messages = result.get("messages", [])
-    tool_calls = extract_tool_records(messages, load_id=load_id, event_id=event_id)
-    sop_branch = _extract_sop_branch(messages) or "agent"
+    try:
+        tool_calls = extract_tool_records(messages, load_id=load_id, event_id=event_id)
+    except Exception as exc:
+        logger.exception(
+            "Tool-call extraction failed load_id=%s event_id=%s", load_id, event_id
+        )
+        return AgentDecision(
+            noop=True,
+            reason=f"tool-call extraction error: {type(exc).__name__}: {exc}",
+            summary="No action.",
+            rationale="failed to parse tool-call trajectory from agent messages",
+            messages=messages,
+        )
+
+    summary, rationale = parse_final_answer(messages)
+    if not summary and not rationale:
+        logger.warning(
+            "Agent final message missing SUMMARY/RATIONALE markers load_id=%s event_id=%s",
+            load_id,
+            event_id,
+        )
+
+    reason = ""
+    if not tool_calls:
+        reason = "agent produced no tool calls"
+    elif not summary:
+        reason = "agent final message missing SUMMARY/RATIONALE markers"
+
     return AgentDecision(
         state_delta=result.get("load_state") or {},
         active_timers=result.get("active_timers"),
         tool_calls=tool_calls,
         noop=not tool_calls,
-        reason="agent produced no tool calls" if not tool_calls else "",
-        sop_branch=sop_branch,
+        reason=reason,
+        summary=summary,
+        rationale=rationale,
+        messages=messages,
     )
-
-
-def _extract_sop_branch(messages: list[Any]) -> str:
-    for msg in reversed(messages):
-        if not isinstance(msg, AIMessage):
-            continue
-        match = _SOP_BRANCH_RE.search(msg.text)
-        if match:
-            return match.group(1)
-    return ""
 
 
 async def route_event(
@@ -176,7 +322,15 @@ async def route_event(
     if event.get("event_type") == "inbound_communication":
         if event.get("inbound_communication", {}).get("sender_type") == "broker":
             return AgentDecision(
-                noop=True, reason="broker message ignored", sop_branch="broker_messages"
+                noop=True,
+                reason="broker message ignored",
+                summary="No action.",
+                rationale="broker-originated inbound; ignored per SOP",
             )
         return await run_agent_for_event(load_state, active_timers or {}, event)
-    return AgentDecision(noop=True, reason="no matching branch", sop_branch="no_action")
+    return AgentDecision(
+        noop=True,
+        reason="no matching branch",
+        summary="No action.",
+        rationale="event type is not handled by an active SOP section",
+    )

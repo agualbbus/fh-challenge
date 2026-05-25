@@ -28,4 +28,6 @@ class AgentDecision:
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
     noop: bool = False
     reason: str = ""
-    sop_branch: str = ""
+    summary: str = ""
+    rationale: str = ""
+    messages: list[Any] = field(default_factory=list)

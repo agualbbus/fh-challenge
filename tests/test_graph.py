@@ -1,15 +1,44 @@
-"""LangGraph unit tests with in-memory checkpointer."""
+"""LangGraph unit tests with in-memory checkpointer and a scripted chat model."""
 
 from __future__ import annotations
 
 import pytest
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import MemorySaver
 
+from app.worker import agent as agent_module
 from app.worker.graph import build_graph, graph_config, invoke_input, query_load_state
+
+from tests._llm_stub import ScriptedChatModel, tool_call
 
 
 @pytest.mark.asyncio
-async def test_graph_processes_inbound_event() -> None:
+async def test_graph_processes_inbound_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    scripted = ScriptedChatModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    tool_call("get_load_info", {"field": "delivery_address"}),
+                    tool_call(
+                        "send_sms",
+                        {
+                            "recipient": "driver",
+                            "message": "456 Delivery St, Dallas, TX 75201",
+                        },
+                    ),
+                ],
+            ),
+            AIMessage(
+                content=(
+                    "SUMMARY: Replied to driver with delivery address by SMS.\n"
+                    "RATIONALE: Driver asked for delivery address; value was in load_data."
+                ),
+            ),
+        ]
+    )
+    monkeypatch.setattr(agent_module, "get_chat_model", lambda: scripted)
+
     checkpointer = MemorySaver()
     graph = build_graph(checkpointer)
     load_id = "graph-test-3b"
