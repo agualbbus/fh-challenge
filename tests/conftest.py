@@ -11,7 +11,7 @@ for _var in ("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2", "LANGCHAIN_TRACING"):
 for _var in ("LANGSMITH_API_KEY", "LANGCHAIN_API_KEY"):
     os.environ.pop(_var, None)
 
-import pytest
+import pytest  # noqa: E402
 
 
 @pytest.fixture
