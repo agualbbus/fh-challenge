@@ -96,6 +96,8 @@ locals {
     { name = "MODEL_MODE", value = var.model_mode },
   ]
 
+  api_env = local.common_env
+
   worker_env = concat(local.common_env, [
     { name = "LANGSMITH_TRACING", value = "true" },
     { name = "LANGSMITH_PROJECT", value = "fh-prod" },
@@ -130,8 +132,8 @@ resource "aws_ecs_task_definition" "api" {
       portMappings = [
         { containerPort = 8000, protocol = "tcp" }
       ]
-      environment = local.worker_env
-      secrets     = local.worker_secrets
+      environment = local.api_env
+      secrets     = local.common_secrets
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -160,8 +162,8 @@ resource "aws_ecs_task_definition" "worker" {
       image       = local.image_tag
       essential   = true
       command     = ["python", "-m", "app.worker"]
-      environment = local.common_env
-      secrets     = local.common_secrets
+      environment = local.worker_env
+      secrets     = local.worker_secrets
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -181,6 +183,10 @@ resource "aws_ecs_service" "api" {
   task_definition = aws_ecs_task_definition.api[0].arn
   desired_count   = 1
   launch_type     = "FARGATE"
+
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
 
   network_configuration {
     subnets          = aws_subnet.public[*].id
@@ -204,6 +210,10 @@ resource "aws_ecs_service" "worker" {
   task_definition = aws_ecs_task_definition.worker[0].arn
   desired_count   = 1
   launch_type     = "FARGATE"
+
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
 
   network_configuration {
     subnets          = aws_subnet.public[*].id
