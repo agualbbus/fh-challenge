@@ -119,7 +119,7 @@ def _format_customer_profile(profile: CustomerProfile) -> str:
     mli_line = "; ".join(mli_bits)
 
     return (
-        f"<customer_profile customer_id=\"{profile.customer_id}\">\n"
+        f'<customer_profile customer_id="{profile.customer_id}">\n'
         f"- Escalation channels: {', '.join(profile.escalation.channels)}\n"
         f"- Delivery geofence radius: {profile.geofence_radius_miles} miles\n"
         f"- ETA follow-up cadence: every {profile.eta_followup_minutes} minutes\n"
@@ -133,7 +133,7 @@ def _format_customer_profile(profile: CustomerProfile) -> str:
 
 def _sop_block(task: str) -> str:
     sop = get_sop_document(task)
-    return f"<sop task=\"{task}\">\n{sop or '(no SOP loaded)'}\n</sop>"
+    return f'<sop task="{task}">\n{sop or "(no SOP loaded)"}\n</sop>'
 
 
 def _load_state_block(load_state: dict[str, Any]) -> str:
@@ -148,22 +148,22 @@ def _examples_block() -> str:
     return (
         "<examples>\n"
         "Example 1 — Driver asks for delivery address (SMS):\n"
-        "- Tool call: get_load_info(field=\"delivery_address\")\n"
-        "- Tool call: send_sms(recipient=\"driver\", message=\"456 Delivery St, Dallas, TX 75201\")\n"
+        '- Tool call: get_load_info(field="delivery_address")\n'
+        '- Tool call: send_sms(recipient="driver", message="456 Delivery St, Dallas, TX 75201")\n'
         "- Final message after tools:\n"
         "  SUMMARY: Replied to driver with delivery address by SMS.\n"
         "  RATIONALE: Driver asked for delivery address; value was in load_data.\n"
         "\n"
-        "Example 2 — Driver provides ETA \"ETA 3pm\" (SMS):\n"
-        "- Tool call: record_eta(eta=\"15:00\", timezone=\"America/Chicago\")\n"
-        "- Tool call: send_sms(recipient=\"driver\", message=\"Got it — ETA 3pm noted.\")\n"
+        'Example 2 — Driver provides ETA "ETA 3pm" (SMS):\n'
+        '- Tool call: record_eta(eta="15:00", timezone="America/Chicago")\n'
+        '- Tool call: send_sms(recipient="driver", message="Got it — ETA 3pm noted.")\n'
         "- Final message after tools:\n"
         "  SUMMARY: Recorded driver ETA of 15:00 local and acknowledged on SMS.\n"
         "  RATIONALE: Driver provided usable ETA; recorded and acknowledged per SOP.\n"
         "\n"
         "Example 3 — Driver reports breakdown (SMS):\n"
-        "- Tool call: create_issue(title=\"Operational issue reported\", description=\"truck broke down\", issue_type=\"equipment_failure\")\n"
-        "- Tool call: send_sms(recipient=\"driver\", message=\"Thanks — the team will review this shortly.\")\n"
+        '- Tool call: create_issue(title="Operational issue reported", description="truck broke down", issue_type="equipment_failure")\n'
+        '- Tool call: send_sms(recipient="driver", message="Thanks — the team will review this shortly.")\n'
         "- Final message after tools:\n"
         "  SUMMARY: Logged breakdown as operational issue and acknowledged driver on SMS.\n"
         "  RATIONALE: Driver reported equipment failure; SOP requires logging + brief ack.\n"
@@ -194,9 +194,7 @@ def build_system_prompt(load_state: dict[str, Any], event: dict[str, Any]) -> st
         raise ValueError("load_state missing customer_id")
     task = load_state.get("active_task")
     if not task:
-        raise ValueError(
-            "load_state missing active_task; seed_node should set this from milestone"
-        )
+        raise ValueError("load_state missing active_task; seed_node should set this from milestone")
     profile = get_customer_profile(customer_id)
     milestone = load_state.get("milestone", "on_route_to_delivery")
     return "\n\n".join(
@@ -276,9 +274,7 @@ async def run_agent_for_event(
     try:
         tool_calls = extract_tool_records(messages, load_id=load_id, event_id=event_id)
     except Exception as exc:
-        logger.exception(
-            "Tool-call extraction failed load_id=%s event_id=%s", load_id, event_id
-        )
+        logger.exception("Tool-call extraction failed load_id=%s event_id=%s", load_id, event_id)
         return AgentDecision(
             noop=True,
             reason=f"tool-call extraction error: {type(exc).__name__}: {exc}",

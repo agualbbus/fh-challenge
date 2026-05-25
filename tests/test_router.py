@@ -34,8 +34,7 @@ async def test_route_event_invokes_agent_and_records_tool_calls(
             ),
             AIMessage(
                 content=(
-                    "SUMMARY: Replied with delivery address.\n"
-                    "RATIONALE: Driver asked for address."
+                    "SUMMARY: Replied with delivery address.\nRATIONALE: Driver asked for address."
                 ),
             ),
         ]

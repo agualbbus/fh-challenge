@@ -41,7 +41,10 @@ def extract_tool_records(
         if isinstance(msg, AIMessage) and msg.tool_calls:
             for tc in msg.tool_calls:
                 tc_id = tc.get("id", str(uuid.uuid4()))
-                pending[tc_id] = {"name": tc.get("name", ""), "args": tc.get("args", {})}
+                pending[tc_id] = {
+                    "name": tc.get("name", ""),
+                    "args": tc.get("args", {}),
+                }
         elif isinstance(msg, ToolMessage):
             info = pending.pop(msg.tool_call_id, {})
             records.append(

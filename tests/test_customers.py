@@ -33,5 +33,9 @@ def test_validate_customer_id_rejects_unknown() -> None:
 def test_get_customer_profile_has_required_fields() -> None:
     profile = get_customer_profile("customer_b")
     assert profile.customer_id == "customer_b"
-    assert profile.missing_load_info.slack_audience in {"internal", "broker", "customer"}
+    assert profile.missing_load_info.slack_audience in {
+        "internal",
+        "broker",
+        "customer",
+    }
     assert profile.eta_followup_minutes > 0

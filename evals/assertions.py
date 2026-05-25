@@ -28,15 +28,11 @@ def assert_tool_called(
         # fixture substrings like "checking".
         haystack = str(matches).lower()
         if contains.lower() not in haystack:
-            raise AssertionError(
-                f"Tool {tool} calls did not contain {contains!r}: {matches}"
-            )
+            raise AssertionError(f"Tool {tool} calls did not contain {contains!r}: {matches}")
 
     if arguments is not None:
         if not any(_tool_args_match(tc.get("arguments", {}), arguments) for tc in matches):
-            raise AssertionError(
-                f"Tool {tool} missing arguments {arguments}: {matches}"
-            )
+            raise AssertionError(f"Tool {tool} missing arguments {arguments}: {matches}")
 
 
 def assert_tool_forbidden(tool_calls: list[dict[str, Any]], tool: str) -> None:

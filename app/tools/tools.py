@@ -99,9 +99,7 @@ def check_attachment(attachment_id: str, runtime: ToolRuntime) -> dict[str, Any]
     }
 
 
-LoadMilestone = Literal[
-    "on_route_to_delivery", "at_delivery", "delivered", "pod_collected"
-]
+LoadMilestone = Literal["on_route_to_delivery", "at_delivery", "delivered", "pod_collected"]
 
 
 @tool
@@ -116,7 +114,10 @@ def update_load_state(target_state: LoadMilestone, runtime: ToolRuntime) -> Comm
 
 EtaTarget = Literal["delivery"]
 TimerType = Literal[
-    "eta_followup", "pod_followup", "delivery_status_followup", "attachment_clarification"
+    "eta_followup",
+    "pod_followup",
+    "delivery_status_followup",
+    "attachment_clarification",
 ]
 
 
@@ -177,9 +178,7 @@ def cancel_timers(runtime: ToolRuntime, timer_type: str | None = None) -> Comman
     return _state_command(_ok(), runtime, active_timers=active_timers)
 
 
-TaskType = Literal[
-    "missing_load_info", "pod_review", "lumper_review", "manual_followup", "other"
-]
+TaskType = Literal["missing_load_info", "pod_review", "lumper_review", "manual_followup", "other"]
 IssueType = Literal["equipment_failure", "delivery_delay", "facility_problem", "other"]
 
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 CUSTOMERS_DIR = Path(__file__).resolve().parent
 
@@ -53,9 +53,7 @@ def _load_profiles() -> dict[str, CustomerProfile]:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         profile = CustomerProfile.model_validate(data)
         if profile.customer_id in profiles:
-            raise RuntimeError(
-                f"Duplicate customer_id {profile.customer_id!r} in {path.name}"
-            )
+            raise RuntimeError(f"Duplicate customer_id {profile.customer_id!r} in {path.name}")
         profiles[profile.customer_id] = profile
     if not profiles:
         raise RuntimeError(f"No customer profiles found in {CUSTOMERS_DIR}")

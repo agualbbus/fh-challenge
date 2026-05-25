@@ -43,9 +43,7 @@ def get_load_field(load_data: dict[str, Any], field: str) -> str | None:
         phone = driver.get("phone")
         if phone:
             return phone
-        name = " ".join(
-            p for p in [driver.get("first_name"), driver.get("last_name")] if p
-        )
+        name = " ".join(p for p in [driver.get("first_name"), driver.get("last_name")] if p)
         return name or None
     if field == "delivery_appointment":
         appt = delivery.get("appointment", {})

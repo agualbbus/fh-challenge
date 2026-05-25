@@ -51,6 +51,8 @@ Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for
 | Run worker | `uv run python -m app.worker` |
 | Evals | `uv run python evals/run_evals.py` (needs API + worker + Postgres + SQS) |
 | Tests | `uv run pytest` |
+| Lint | `uv run ruff check .` and `uv run ruff format --check .` |
+| PR CI | `.github/workflows/ci.yml` — ruff + pytest on every pull request |
 | Customer config | `CustomerProfile` from YAML — no scattered `if customer_id` |
 | Cloud deploy | Push to `main` → GitHub Actions OIDC → ECR `:sha`/`:latest` → ECS `force-new-deployment` (not CodePipeline) |
 

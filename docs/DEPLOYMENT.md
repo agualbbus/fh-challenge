@@ -25,7 +25,9 @@ Or run the full stack: `docker compose up --build` (ensure `.dockerignore` exclu
 
 ### CI/CD (GitHub Actions)
 
-Workflow: [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)
+**Pull requests and `main`:** [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs `ruff check`, `ruff format --check`, and `uv run pytest` (no AWS credentials required).
+
+**Deploy:** [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)
 
 **One-time setup:** after `terraform apply`, set GitHub secret `AWS_DEPLOY_ROLE_ARN` from `terraform output -raw github_deploy_role_arn`. OIDC trust allows `github-ecs-setup` and `main` (see `var.github_deploy_branches`).
 

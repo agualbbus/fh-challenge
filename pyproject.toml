@@ -23,6 +23,13 @@ dependencies = [
     "langchain>=1.0",
 ]
 
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint.per-file-ignores]
+"evals/run_evals.py" = ["E402"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
@@ -31,4 +38,5 @@ pythonpath = ["."]
 [dependency-groups]
 dev = [
     "pytest-cov>=7.1.0",
+    "ruff>=0.15.14",
 ]
