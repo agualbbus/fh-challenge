@@ -26,6 +26,11 @@ else
 fi
 export SONAR_HOST_URL="$SCANNER_HOST_URL"
 
+if [[ "${SONAR_SKIP_COVERAGE:-}" != "1" ]]; then
+  echo "Generating coverage.xml via pytest-cov"
+  uv run pytest --cov=app --cov-report=xml -q
+fi
+
 echo "Scanning $ROOT -> $SCANNER_HOST_URL"
 
 # Git Bash (MSYS) rewrites -w /usr/src to C:/Program Files/Git/usr/src unless disabled.

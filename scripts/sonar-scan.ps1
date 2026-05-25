@@ -30,6 +30,12 @@ $scannerHostUrl = if ($env:SONAR_SCANNER_HOST_URL) {
 }
 $env:SONAR_HOST_URL = $scannerHostUrl
 
+if ($env:SONAR_SKIP_COVERAGE -ne "1") {
+    Write-Host "Generating coverage.xml via pytest-cov"
+    & uv run pytest --cov=app --cov-report=xml -q
+    if ($LASTEXITCODE -ne 0) { throw "pytest failed; aborting scan" }
+}
+
 Write-Host "Scanning $Root -> $scannerHostUrl"
 
 docker run --rm `

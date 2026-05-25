@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # a Pydantic schema makes the model skip the tool loop on most providers.
 _SUMMARY_RE = re.compile(r"^\s*SUMMARY\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 _RATIONALE_RE = re.compile(r"^\s*RATIONALE\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+_NOOP_SUMMARY = "No action."
 
 
 def _message_text(msg: Any) -> str:
@@ -263,7 +264,7 @@ async def run_agent_for_event(
         return AgentDecision(
             noop=True,
             reason=f"agent invocation error: {type(exc).__name__}: {exc}",
-            summary="No action.",
+            summary=_NOOP_SUMMARY,
             rationale="agent invocation raised an exception",
         )
     finally:
@@ -278,7 +279,7 @@ async def run_agent_for_event(
         return AgentDecision(
             noop=True,
             reason=f"tool-call extraction error: {type(exc).__name__}: {exc}",
-            summary="No action.",
+            summary=_NOOP_SUMMARY,
             rationale="failed to parse tool-call trajectory from agent messages",
             messages=messages,
         )
@@ -320,7 +321,7 @@ async def route_event(
             return AgentDecision(
                 noop=True,
                 reason="broker message ignored",
-                summary="No action.",
+                summary=_NOOP_SUMMARY,
                 rationale="broker-originated inbound; ignored per SOP",
             )
         return await run_agent_for_event(load_state, active_timers or {}, event)

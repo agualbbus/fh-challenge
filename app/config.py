@@ -14,6 +14,15 @@ def _env(key: str, default: str = "") -> str:
     return os.getenv(key, default)
 
 
+def _default_database_url() -> str:
+    user = _env("POSTGRES_USER", "watchtower")
+    password = _env("POSTGRES_PASSWORD", "watchtower")
+    host = _env("POSTGRES_HOST", "localhost")
+    port = _env("POSTGRES_PORT", "5432")
+    db = _env("POSTGRES_DB", "watchtower")
+    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str
@@ -37,10 +46,7 @@ def get_settings() -> Settings:
     lc_key = _env("LANGCHAIN_API_KEY")
     endpoint = _env("AWS_ENDPOINT_URL")
     return Settings(
-        database_url=_env(
-            "DATABASE_URL",
-            "postgresql://watchtower:watchtower@localhost:5432/watchtower",
-        ),
+        database_url=_env("DATABASE_URL", _default_database_url()),
         sqs_queue_url=_env(
             "SQS_QUEUE_URL",
             "http://localhost:9324/000000000000/freight-watchtower.fifo",
