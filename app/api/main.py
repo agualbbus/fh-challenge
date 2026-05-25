@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routes import router
+from app.api.routes import router, write_router
 from app.customers.base import get_customer_profiles
 
 
@@ -16,3 +16,4 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="FreightHero Watchtower", version="0.1.0", lifespan=lifespan)
 app.include_router(router)
+app.include_router(write_router)

@@ -20,4 +20,6 @@ build/
 *.egg-info/
 terraform.exe
 infra/app-secrets.json
+infra/.secrets-gen
+infra/apply-*.log
 docker/sonarqube

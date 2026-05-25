@@ -1,0 +1,308 @@
+{
+  "info": {
+    "name": "FreightHero Watchtower",
+    "_postman_id": "722276c4-3473-4784-8aa2-61369dfa75c5",
+    "description": "FreightHero AI Watchtower API. Set `baseUrl` (e.g. http://freight-watchtower-api-313864937.us-east-1.elb.amazonaws.com or http://localhost:8000) and `apiKey` in the collection variables. Auth is X-API-Key header on all write endpoints; /health is public.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "X-API-Key",
+        "type": "string"
+      },
+      {
+        "key": "value",
+        "value": "{{apiKey}}",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://freight-watchtower-api-313864937.us-east-1.elb.amazonaws.com",
+      "type": "string"
+    },
+    {
+      "key": "apiKey",
+      "value": "",
+      "type": "string",
+      "description": "X-API-Key for write endpoints. Pull from AWS Secrets Manager `freight-watchtower/app` -> API_KEY."
+    }
+  ],
+  "item": [
+    {
+      "name": "Health (no auth)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
+        },
+        "description": "Liveness + SQS + Postgres reachability check. No API key required."
+      }
+    },
+    {
+      "name": "Seed Load",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/loads",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "loads"
+          ]
+        },
+        "description": "Publish a load-seed message. Returns 202 with workflow_id.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"load_id\": \"load-visible-001\",\n  \"customer_id\": \"customer_a\",\n  \"initial_state\": \"on_route_to_delivery\",\n  \"load_data\": {\n    \"external_load_id\": \"FH-2026-001\",\n    \"po_number\": \"PO-7788\",\n    \"instructions\": \"Receiver requires check-in at guard shack. Follow BOL temperature instructions.\",\n    \"companies\": {\n      \"broker\": {\n        \"name\": \"Example Broker\",\n        \"uuid\": \"broker-example\"\n      },\n      \"shipper\": {\n        \"name\": \"Example Shipper\",\n        \"uuid\": \"shipper-example\"\n      },\n      \"carrier\": {\n        \"name\": \"Example Carrier\",\n        \"uuid\": \"carrier-example\"\n      }\n    },\n    \"contacts\": {\n      \"driver\": {\n        \"first_name\": \"Sam\",\n        \"last_name\": \"Driver\",\n        \"phone\": \"+15555550100\",\n        \"uuid\": \"driver-sam\"\n      },\n      \"dispatcher\": {\n        \"first_name\": \"Dana\",\n        \"last_name\": \"Dispatch\",\n        \"email\": \"dispatch@example.com\",\n        \"uuid\": \"dispatcher-dana\"\n      },\n      \"broker\": {\n        \"first_name\": \"Blake\",\n        \"last_name\": \"Broker\",\n        \"email\": \"broker@example.com\",\n        \"uuid\": \"broker-contact\"\n      }\n    },\n    \"stops\": [\n      {\n        \"stop_id\": \"pickup-1\",\n        \"type\": \"pickup\",\n        \"status\": \"departed\",\n        \"address\": {\n          \"line_1\": \"123 Pickup Ave\",\n          \"line_2\": null,\n          \"city\": \"Chicago\",\n          \"state\": \"IL\",\n          \"postal_code\": \"60601\",\n          \"country\": \"US\"\n        },\n        \"appointment\": {\n          \"type\": \"fixed\",\n          \"start_utc\": \"2026-05-10T14:00:00Z\",\n          \"timezone\": \"America/Chicago\"\n        },\n        \"coordinates\": {\n          \"lat\": 41.8781,\n          \"lng\": -87.6298\n        },\n        \"reference_numbers\": {\n          \"pickup\": \"PU-123\"\n        }\n      },\n      {\n        \"stop_id\": \"delivery-1\",\n        \"type\": \"delivery\",\n        \"status\": \"en_route\",\n        \"address\": {\n          \"line_1\": \"456 Delivery St\",\n          \"line_2\": \"Dock 4\",\n          \"city\": \"Dallas\",\n          \"state\": \"TX\",\n          \"postal_code\": \"75201\",\n          \"country\": \"US\"\n        },\n        \"appointment\": {\n          \"type\": \"fixed\",\n          \"start_utc\": \"2026-05-11T20:00:00Z\",\n          \"timezone\": \"America/Chicago\"\n        },\n        \"coordinates\": {\n          \"lat\": 32.7767,\n          \"lng\": -96.797\n        },\n        \"reference_numbers\": {\n          \"delivery\": \"DEL-456\",\n          \"receiver_phone\": \"+15555550200\"\n        }\n      }\n    ]\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Submit Task",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/submit-task",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "submit-task"
+          ]
+        },
+        "description": "Submit a task (delivery_eta_checkpoint | confirm_delivery).",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"task_uuid\": \"task-uuid-001\",\n  \"load_id\": \"load-visible-001\",\n  \"customer_id\": \"customer_a\",\n  \"task_instruction_type\": \"delivery_eta_checkpoint\",\n  \"requested_at\": \"2026-05-24T23:30:00Z\",\n  \"source\": \"operator\",\n  \"payload\": {}\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Event - Inbound Communication",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/events/inbound-communication",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "events",
+            "inbound-communication"
+          ]
+        },
+        "description": "Driver/dispatcher/etc inbound SMS or email. Routed to the 3b agent.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"event_id\": \"evt-3b\",\n  \"event_type\": \"inbound_communication\",\n  \"load_id\": \"load-visible-001\",\n  \"customer_id\": \"customer_a\",\n  \"occurred_at\": \"2026-05-11T17:05:00Z\",\n  \"inbound_communication\": {\n    \"channel\": \"sms\",\n    \"sender_type\": \"driver\",\n    \"sender_name\": \"Sam Driver\",\n    \"content\": \"What's the delivery address?\",\n    \"attachments\": []\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Event - Tracking",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/events/tracking",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "events",
+            "tracking"
+          ]
+        },
+        "description": "GPS tracking ping.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"event_id\": \"evt-track-001\",\n  \"event_type\": \"tracking\",\n  \"load_id\": \"load-visible-001\",\n  \"customer_id\": \"customer_a\",\n  \"occurred_at\": \"2026-05-24T23:30:00Z\",\n  \"tracking\": {\n    \"tracking_id\": \"trk-1\",\n    \"lat\": 37.7749,\n    \"lng\": -122.4194,\n    \"distance_to_delivery_miles\": 12.5,\n    \"ping_sequence\": 1,\n    \"provider\": \"samsara\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Event - Load Update",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/events/load-update",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "events",
+            "load-update"
+          ]
+        },
+        "description": "Milestone or load_data patch update.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"event_id\": \"evt-upd-001\",\n  \"event_type\": \"load_update\",\n  \"load_id\": \"load-visible-001\",\n  \"customer_id\": \"customer_a\",\n  \"occurred_at\": \"2026-05-24T23:30:00Z\",\n  \"load_update\": {\n    \"milestone_state\": \"at_delivery\",\n    \"reason\": \"driver arrived at delivery\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Auth - Missing key (expect 401)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/loads",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "loads"
+          ]
+        },
+        "description": "Negative test: omits X-API-Key. Expect 401.",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Auth - Wrong key (expect 401)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "not-the-real-key"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/loads",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "loads"
+          ]
+        },
+        "description": "Negative test: wrong X-API-Key. Expect 401.",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

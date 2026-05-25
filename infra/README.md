@@ -40,10 +40,6 @@ Copy `app-secrets.json.example` → `app-secrets.json` (gitignored), fill:
 - `DATABASE_URL`
 - `SQS_QUEUE_URL`
 - `OPENROUTER_API_KEY` (optional for mock mode)
-- `LANGCHAIN_API_KEY` (optional)
+- `LANGSMITH_API_KEY` (optional; injected into the worker as both `LANGSMITH_API_KEY` and `LANGCHAIN_API_KEY`)
 
 Then `terraform apply` uploads to Secrets Manager.
-
-## Local development
-
-Use `docker compose` for Postgres and ElasticMQ — no Terraform required for local evals.

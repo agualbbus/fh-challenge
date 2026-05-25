@@ -40,6 +40,18 @@ variable "db_username" {
   default     = "watchtower"
 }
 
+variable "image_tag" {
+  description = "Container image tag pushed to ECR."
+  type        = string
+  default     = "latest"
+}
+
+variable "model_mode" {
+  description = "MODEL_MODE env (mock | live)."
+  type        = string
+  default     = "mock"
+}
+
 variable "db_password" {
   description = "PostgreSQL master password (override via TF_VAR_db_password)."
   type        = string

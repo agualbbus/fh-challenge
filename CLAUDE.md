@@ -6,7 +6,7 @@ Context for AI agents working in this repository. **Keep this file up to date** 
 
 Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for ETA checkpoint and confirm delivery workflows, with LangGraph + SQS + PostgreSQL, declarative customer config, mocked recorded tools, and fixture evals.
 
-**Current state:** Five write APIs (`202`), SQS FIFO ingress, LangGraph per-load graph with Postgres checkpoints, LangChain `create_agent`, HTTP eval harness for `3b`/`3c`. LangSmith optional via env vars (`LANGCHAIN_TRACING_V2=false` by default). Phase 4+ fixtures and ECS deploy pending.
+**Current state:** Five write APIs (`202`), SQS FIFO ingress, LangGraph per-load graph with Postgres checkpoints, LangChain `create_agent`, HTTP eval harness for `3b`/`3c`. LangSmith optional via env vars (`LANGSMITH_TRACING=false` by default; ECS worker also sets legacy `LANGCHAIN_*` aliases). Phase 4+ fixtures and ECS deploy pending.
 
 ## Canonical documents
 
