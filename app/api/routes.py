@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.api.auth import require_api_key
 from app.api.schemas import (
     AcceptedResponse,
     InboundCommunicationEvent,
@@ -26,6 +27,7 @@ from app.queue.publisher import publish_work_item
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+write_router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
 def _publish(load_id: str, kind: str, payload: dict, dedup_id: str) -> AcceptedResponse:
@@ -79,12 +81,12 @@ async def health() -> dict:
     return body
 
 
-@router.post("/loads", status_code=status.HTTP_202_ACCEPTED, response_model=AcceptedResponse)
+@write_router.post("/loads", status_code=status.HTTP_202_ACCEPTED, response_model=AcceptedResponse)
 async def create_load(body: LoadSeedRequest) -> AcceptedResponse:
     return _publish(body.load_id, "seed", _seed_from_load(body), dedup_id_for_seed(body.load_id))
 
 
-@router.post(
+@write_router.post(
     "/submit-task",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=AcceptedResponse,
@@ -94,7 +96,7 @@ async def submit_task(body: SubmitTaskRequest) -> AcceptedResponse:
     return _publish(body.load_id, "task", payload, dedup_id_for_task(payload))
 
 
-@router.post(
+@write_router.post(
     "/events/inbound-communication",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=AcceptedResponse,
@@ -104,7 +106,7 @@ async def inbound_communication(body: InboundCommunicationEvent) -> AcceptedResp
     return _publish(body.load_id, "event", payload, dedup_id_for_event(payload))
 
 
-@router.post(
+@write_router.post(
     "/events/tracking",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=AcceptedResponse,
@@ -114,7 +116,7 @@ async def tracking_event(body: TrackingEvent) -> AcceptedResponse:
     return _publish(body.load_id, "event", payload, dedup_id_for_event(payload))
 
 
-@router.post(
+@write_router.post(
     "/events/load-update",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=AcceptedResponse,
