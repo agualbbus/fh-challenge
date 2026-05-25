@@ -24,7 +24,22 @@ make dev-worker    # terminal 2
 curl http://localhost:8000/health
 ```
 
-**Full stack in Docker:**
+**Full stack local development in Docker:**
+
+For the dockerized stack, the only env vars you need in `.env` are the LLM and (optional) tracing credentials — Compose injects the container-internal `DATABASE_URL`, `SQS_QUEUE_URL`, and AWS endpoint values for you. Create a `.env` with:
+
+```bash
+# required
+OPENROUTER_API_KEY=sk-or-...
+
+# optional — enable LangSmith tracing
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=lsv2_...
+LANGSMITH_PROJECT=fh-dev
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+```
+
+Leave any `DATABASE_URL` / `SQS_QUEUE_URL` / `AWS_*` lines commented out — they target `localhost` and would conflict with the container network. Then:
 
 ```bash
 docker compose up --build
@@ -35,7 +50,7 @@ curl http://localhost:8000/health
 - Postgres: `localhost:5432` (db `watchtower`)
 - ElasticMQ: http://localhost:9324
 
-Copy [`.env.example`](.env.example) to `.env` for overrides.
+See [`.env.example`](.env.example) for the full list of supported overrides (used when running the API/worker on the host instead of in containers).
 
 Agent runs use **[OpenRouter](https://openrouter.ai/)** via `langchain-openrouter` (`OPENROUTER_API_KEY`) — see [implementation-spec §2.9](docs/research/implementation-spec.md). Tests stub the chat model via the `app.worker.llm.get_chat_model` seam (no LLM mock module).
 
