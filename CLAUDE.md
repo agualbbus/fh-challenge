@@ -6,7 +6,7 @@ Context for AI agents working in this repository. **Keep this file up to date** 
 
 Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for ETA checkpoint and confirm delivery workflows, with LangGraph + SQS + PostgreSQL, declarative customer config, mocked recorded tools, and fixture evals.
 
-**Current state:** Five write APIs (`202`), SQS FIFO ingress, LangGraph per-load graph with Postgres checkpoints, LangChain `create_agent`, HTTP eval harness for `3b`/`3c`. LangSmith optional via env vars (`LANGSMITH_TRACING=false` by default; ECS worker also sets legacy `LANGCHAIN_*` aliases). Phase 4+ fixtures and ECS deploy pending.
+**Current state:** Five write APIs (`202`), SQS FIFO ingress, LangGraph per-load graph with Postgres checkpoints, LangChain `create_agent`, HTTP eval harness for `3b`/`3c`. LangSmith optional via env vars (`LANGSMITH_TRACING=false` by default; ECS worker also sets legacy `LANGCHAIN_*` aliases). AWS ECS/ALB/RDS/SQS via Terraform; `main` deploys via GitHub Actions OIDC → ECR → ECS force deploy. Phase 4+ fixtures pending.
 
 ## Canonical documents
 
@@ -52,6 +52,7 @@ Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for
 | Evals | `uv run python evals/run_evals.py` (needs API + worker + Postgres + SQS) |
 | Tests | `uv run pytest` |
 | Customer config | `CustomerProfile` from YAML — no scattered `if customer_id` |
+| Cloud deploy | Push to `main` → GitHub Actions OIDC → ECR `:sha`/`:latest` → ECS `force-new-deployment` (not CodePipeline) |
 
 ## Phase map
 
@@ -61,7 +62,7 @@ Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for
 | **2** Agent harness (tools, customers, evals, LangSmith stub) | Done |
 | **3** `3b` / `3c` via `create_agent` + write APIs | Done |
 | **4+** Remaining visible fixtures | Planned |
-| **Submission** | AWS deploy, evidence, `AI_USAGE.md` | Planned |
+| **Submission** | Live evidence, `AI_USAGE.md` | Planned |
 
 ## Gotchas
 

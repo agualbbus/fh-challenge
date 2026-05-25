@@ -155,5 +155,5 @@ resource "aws_lb_listener" "api" {
   }
 }
 
-# Task definitions and ECS services are completed when deploying (post–Phase 3).
-# Skeleton: cluster, ALB, target group, security groups, ECR.
+# ECS services and task definitions: see aws_ecs_services.tf.
+# Deploys: GitHub Actions OIDC → ECR → force-new-deployment (see aws_github_oidc.tf).

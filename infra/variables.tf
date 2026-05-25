@@ -52,3 +52,9 @@ variable "db_password" {
   sensitive   = true
   default     = "change-me-in-tfvars"
 }
+
+variable "github_deploy_branches" {
+  description = "Git branches allowed to assume the GitHub OIDC deploy role (repo:agualbbus/fh-challenge)."
+  type        = list(string)
+  default     = ["github-ecs-setup", "main"]
+}

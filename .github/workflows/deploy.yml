@@ -1,0 +1,70 @@
+name: deploy
+
+on:
+  push:
+    branches: [github-ecs-setup, main]
+  workflow_dispatch:
+    inputs:
+      deploy_ecs:
+        description: Push :latest and roll ECS (use to test full deploy from a non-main branch)
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+      ECR_REPO: freight-watchtower
+      ECS_CLUSTER: freight-watchtower
+      # main push always rolls ECS; other branches only when workflow_dispatch deploy_ecs=true
+      DEPLOY_ECS: ${{ github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.deploy_ecs) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check AWS deploy role secret
+        run: |
+          if [ -z "${{ secrets.AWS_DEPLOY_ROLE_ARN }}" ]; then
+            echo "::error::GitHub secret AWS_DEPLOY_ROLE_ARN is not set."
+            echo "After terraform apply, add it from: cd infra && terraform output -raw github_deploy_role_arn"
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2.1.5
+
+      - name: Build and push
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          SHA: ${{ github.sha }}
+        run: |
+          IMAGE=$REGISTRY/$ECR_REPO
+          docker build -t $IMAGE:$SHA .
+          docker push $IMAGE:$SHA
+          if [ "$DEPLOY_ECS" = "true" ]; then
+            docker tag $IMAGE:$SHA $IMAGE:latest
+            docker push $IMAGE:latest
+          fi
+
+      - name: Force new ECS deployments
+        if: env.DEPLOY_ECS == 'true'
+        run: |
+          aws ecs update-service --cluster $ECS_CLUSTER \
+            --service freight-watchtower-api --force-new-deployment >/dev/null
+          aws ecs update-service --cluster $ECS_CLUSTER \
+            --service freight-watchtower-worker --force-new-deployment >/dev/null
+
+      - name: Wait for services to stabilize
+        if: env.DEPLOY_ECS == 'true'
+        run: |
+          aws ecs wait services-stable --cluster $ECS_CLUSTER \
+            --services freight-watchtower-api freight-watchtower-worker
