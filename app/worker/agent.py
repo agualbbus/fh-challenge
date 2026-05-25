@@ -14,9 +14,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 from app.customers.base import CustomerProfile, get_customer_profile
 from app.models.decision import AgentDecision
 from app.tools.context import current_event_var, load_state_var
-from app.tools.tools import ALL_TOOLS
 from app.worker.llm import get_chat_model
-from app.worker.sops import get_sop_document
+from app.worker.sops import get_sop_document, tools_for_sop
 from app.worker.tool_extraction import extract_tool_records
 
 logger = logging.getLogger(__name__)
@@ -221,10 +220,10 @@ def sop_prompt(request) -> str:  # noqa: ANN001
     )
 
 
-def build_agent():
+def build_agent(active_task: str | None = None):
     return create_agent(
         get_chat_model(),
-        tools=ALL_TOOLS,
+        tools=tools_for_sop(active_task),
         middleware=[sop_prompt],
         state_schema=WatchtowerAgentState,
     )
@@ -281,7 +280,7 @@ async def run_agent_for_event(
     load_token = load_state_var.set(load_state)
     event_token = current_event_var.set(event)
     try:
-        agent = build_agent()
+        agent = build_agent(load_state.get("active_task"))
         result = await agent.ainvoke(
             {
                 "messages": [HumanMessage(content=json.dumps(event))],

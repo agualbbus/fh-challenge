@@ -110,9 +110,7 @@ def test_create_timer_publishes_and_stores(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_create_timer_without_load_id_skips_publish(monkeypatch: pytest.MonkeyPatch) -> None:
     called: list[dict] = []
-    monkeypatch.setattr(
-        tools_mod, "schedule_timer_message", lambda **kw: called.append(kw)
-    )
+    monkeypatch.setattr(tools_mod, "schedule_timer_message", lambda **kw: called.append(kw))
     runtime = FakeRuntime(state={"load_state": {}, "active_timers": {}})
     create_timer.func(
         timer_type="eta_followup",

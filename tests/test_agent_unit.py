@@ -94,7 +94,7 @@ async def test_run_agent_for_event_catches_llm_exception(monkeypatch: pytest.Mon
         async def ainvoke(self, *_a, **_kw):
             raise RuntimeError("LLM exploded")
 
-    monkeypatch.setattr(agent_module, "build_agent", lambda: Boom())
+    monkeypatch.setattr(agent_module, "build_agent", lambda *_a, **_kw: Boom())
     decision = await agent_module.run_agent_for_event(
         {
             "load_id": "L1",
