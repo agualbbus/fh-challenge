@@ -17,11 +17,11 @@ Or run the full stack: `docker compose up --build` (ensure `.dockerignore` exclu
 `infra/` provisions RDS PostgreSQL, SQS FIFO (+ DLQ), ECR, ECS cluster, ALB, and Secrets Manager.
 
 1. Set `TF_VAR_db_password` (or in `terraform.tfvars`)
-2. Copy `infra/app-secrets.json.example` → `infra/app-secrets.json` with `DATABASE_URL`, `SQS_QUEUE_URL`, `OPENROUTER_API_KEY`, `LANGCHAIN_API_KEY`
+2. Copy `infra/app-secrets.json.example` → `infra/app-secrets.json` with `DATABASE_URL`, `SQS_QUEUE_URL`, `OPENROUTER_API_KEY`, `LANGSMITH_API_KEY`
 3. `terraform apply`
 4. `docker build -t watchtower .` and push to ECR
 5. Run one fixture against the public URL; save evidence under `docs/evidence/`
 
 ## Secrets
 
-Never commit `.env` or `infra/app-secrets.json`. Keys: `DATABASE_URL`, `SQS_QUEUE_URL`, optional `OPENROUTER_API_KEY`, `LANGCHAIN_API_KEY` for live tracing.
+Never commit `.env` or `infra/app-secrets.json`. Keys: `DATABASE_URL`, `SQS_QUEUE_URL`, optional `OPENROUTER_API_KEY`, `LANGSMITH_API_KEY` for live tracing.
