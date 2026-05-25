@@ -60,7 +60,7 @@ variable "db_password" {
 }
 
 variable "github_deploy_branches" {
-  description = "Git branches allowed to assume the GitHub OIDC deploy role (repo:agualbbus/freight-hero)."
+  description = "Git branches allowed to assume the GitHub OIDC deploy role (repo:agualbbus/fh-challenge)."
   type        = list(string)
   default     = ["github-ecs-setup", "main"]
 }

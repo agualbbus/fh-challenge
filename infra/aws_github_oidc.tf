@@ -25,7 +25,7 @@ data "aws_iam_policy_document" "github_deploy_assume" {
       variable = "token.actions.githubusercontent.com:sub"
       values = [
         for branch in var.github_deploy_branches :
-        "repo:agualbbus/freight-hero:ref:refs/heads/${branch}"
+        "repo:agualbbus/fh-challenge:ref:refs/heads/${branch}"
       ]
     }
   }
