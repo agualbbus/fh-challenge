@@ -6,7 +6,7 @@ Context for AI agents working in this repository. **Keep this file up to date** 
 
 Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for ETA checkpoint and confirm delivery workflows, with LangGraph + SQS + PostgreSQL, declarative customer config, mocked recorded tools, and fixture evals.
 
-**Current state:** Five write APIs (`202`), SQS FIFO ingress, LangGraph per-load graph with Postgres checkpoints, LangChain `create_agent`, HTTP eval harness for `3b`/`3c`. AWS ECS Fargate (API + worker), optional GitHub → CodePipeline → CodeBuild → ECR deploy (`infra/aws_cicd.tf`, `buildspec.yml`). Production ECS uses `MODEL_MODE=live` (Terraform `var.model_mode`); local/evals use `mock`. LangSmith optional on the worker via env + Secrets Manager.
+**Current state:** Five write APIs (`202`), SQS FIFO ingress, LangGraph per-load graph with Postgres checkpoints, LangChain `create_agent`, HTTP eval harness for `3b`/`3c`. LangSmith optional via env vars (`LANGSMITH_TRACING=false` by default; ECS worker also sets legacy `LANGCHAIN_*` aliases). Phase 4+ fixtures and ECS deploy pending.
 
 ## Canonical documents
 
@@ -52,8 +52,6 @@ Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for
 | Run worker | `uv run python -m app.worker` |
 | Evals | `uv run python evals/run_evals.py` (needs API + worker + Postgres + SQS) |
 | Tests | `uv run pytest` |
-| CI/CD branch | `ci/aws-codepipeline` worktree; enable with `enable_cicd` in `infra/terraform.tfvars` |
-| AWS deploy | Push to configured GitHub branch → CodePipeline, or manual `terraform apply` + ECR push per [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) |
 | Customer config | `CustomerProfile` from YAML — no scattered `if customer_id` |
 
 ## Phase map
@@ -64,7 +62,7 @@ Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for
 | **2** Agent harness (tools, customers, evals, LangSmith stub) | Done |
 | **3** `3b` / `3c` via `create_agent` + write APIs | Done |
 | **4+** Remaining visible fixtures | Planned |
-| **Submission** | AWS deploy + CI/CD, evidence, `AI_USAGE.md` | In progress |
+| **Submission** | AWS deploy, evidence, `AI_USAGE.md` | Planned |
 
 ## Gotchas
 
