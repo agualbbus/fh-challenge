@@ -29,6 +29,8 @@ class MissingLoadInfoConfig(BaseModel):
 
 class LumperConfig(BaseModel):
     mode: Literal["review_task", "forward_email"]
+    review_task_fallback: bool = False
+    enforce_pod_handling: bool = True
 
 
 class CustomerProfile(BaseModel):
@@ -39,7 +41,7 @@ class CustomerProfile(BaseModel):
     pod: PodConfig
     missing_load_info: MissingLoadInfoConfig
     lumper: LumperConfig
-    first_arrival_message_key: str
+    first_arrival_message: str
 
 
 _profiles: dict[str, CustomerProfile] | None = None

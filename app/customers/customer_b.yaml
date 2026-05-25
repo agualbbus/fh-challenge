@@ -13,4 +13,4 @@ missing_load_info:
   slack_audience: broker
 lumper:
   mode: review_task
-first_arrival_message_key: ask_unloading_and_pod
+first_arrival_message: "Confirm when unloading starts. Send POD when the trailer is empty."

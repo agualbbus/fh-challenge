@@ -37,7 +37,7 @@ curl http://localhost:8000/health
 
 Copy [`.env.example`](.env.example) to `.env` for overrides.
 
-Live agent runs use **[OpenRouter](https://openrouter.ai/)** via `langchain-openrouter` (`OPENROUTER_API_KEY`). CI/evals use `MODEL_MODE=mock` without keys — see [implementation-spec §2.9](docs/research/implementation-spec.md).
+Agent runs use **[OpenRouter](https://openrouter.ai/)** via `langchain-openrouter` (`OPENROUTER_API_KEY`) — see [implementation-spec §2.9](docs/research/implementation-spec.md). Tests stub the chat model via the `app.worker.llm.get_chat_model` seam (no LLM mock module).
 
 ## Configuration
 

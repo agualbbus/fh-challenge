@@ -163,7 +163,7 @@ broker_guard → create_agent (ReAct loop) → extract tool_calls → persist_st
 
 1. Short-circuit broker senders (no-op, log reason).
 2. Build SOP system prompt from customer YAML + active task + event.
-3. Invoke LangChain `create_agent` — `ChatOpenRouter` when `MODEL_MODE=live`, fixture mock LLM when `mock`.
+3. Invoke LangChain `create_agent` with `ChatOpenRouter`.
 4. Agent selects and executes tools via LangChain tool-calling loop.
 5. Extract `ToolCallRecord`s from message history; merge `state_delta` into checkpoint; schedule timer SQS when needed.
 
@@ -196,7 +196,7 @@ Structured logs answer *"Why did the agent call these tools?"* LangSmith traces 
 **LangSmith** (optional — env vars only)
 
 - Set `LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT` for live runs.
-- Default off in CI (`MODEL_MODE=mock` needs no LangSmith key).
+- Default off in unit tests (the chat-model seam is stubbed; LangSmith is optional).
 - LangChain auto-instruments agent calls when tracing is enabled.
 
 ### 2.9 LLM provider — OpenRouter via ChatOpenRouter
@@ -208,20 +208,19 @@ Live agent decisions use **[ChatOpenRouter](https://reference.langchain.com/pyth
 | Auth | `OPENROUTER_API_KEY` in `.env` / Secrets Manager |
 | Primary model | `OPENROUTER_MODEL_PRIMARY` |
 | Fallback model | `OPENROUTER_MODEL_FALLBACK` |
-| Eval / CI | `MODEL_MODE=mock` — fixture mock LLM, no HTTP |
-| Live runs | `MODEL_MODE=live` — primary → fallback on retriable errors |
+| Tests | `app.worker.llm.get_chat_model` is monkeypatched per-test with a scripted chat model |
+| Live runs | Primary → fallback on retriable errors |
 | Tracing | LangSmith auto-instruments LangChain calls when tracing enabled |
 
 **Model fallback chain**
 
 ```text
-OPENROUTER_MODEL_PRIMARY → OPENROUTER_MODEL_FALLBACK → fail (or mock when MODEL_MODE=mock)
+OPENROUTER_MODEL_PRIMARY → OPENROUTER_MODEL_FALLBACK → fail
 ```
 
 **Environment** (`.env.example` + `infra/app-secrets.json`)
 
 ```text
-MODEL_MODE=mock|live
 OPENROUTER_API_KEY=sk-or-...
 OPENROUTER_MODEL_PRIMARY=anthropic/claude-sonnet-4
 OPENROUTER_MODEL_FALLBACK=openai/gpt-4o-mini
@@ -266,8 +265,7 @@ freighthero-watchtower/
 │   │   ├── checkpointer.py
 │   │   ├── agent.py            # create_agent factory
 │   │   ├── router.py           # guards + route_work_item
-│   │   ├── llm.py              # ChatOpenRouter / mock dispatch
-│   │   ├── mock_model.py
+│   │   ├── llm.py              # ChatOpenRouter factory
 │   │   ├── load_data.py
 │   │   └── sops.py
 │   ├── queue/
@@ -521,9 +519,9 @@ Command: `make eval` → writes/updates `evals/EVAL_REPORT.md`.
 
 ### 4.7 Model fallback wiring (OpenRouter)
 
-- [x] `app/worker/llm.py` — `ChatOpenRouter`, primary/fallback, `MODEL_MODE=mock` short-circuit
-- [x] `app/config.py` — `OPENROUTER_*`, `MODEL_MODE`, LangSmith vars
-- [x] README documents `make eval` without `OPENROUTER_API_KEY`
+- [x] `app/worker/llm.py` — `ChatOpenRouter` factory, primary/fallback
+- [x] `app/config.py` — `OPENROUTER_*`, LangSmith vars
+- [x] README documents OpenRouter as the only LLM path
 
 ### 4.8 LangSmith setup (agent harness)
 
@@ -701,7 +699,7 @@ After first cloud deploy, run one fixture manually against production and save:
 | SQS 15 min max delay | EventBridge Scheduler → SQS for long ETA follow-ups in AWS |
 | Checkpoint migration drift | Pin `langgraph-checkpoint-postgres`; call `setup()` on deploy |
 | ECS/IaC time sink | Ship local-first; deploy after evals pass locally |
-| LLM non-determinism in evals | `MODEL_MODE=mock` for CI; live model for demo only |
+| LLM non-determinism in evals | Pin temperature low and accept some assertion tolerance; unit tests stub the chat-model seam |
 
 ### 9.2 Intentional omissions (one-week scope)
 

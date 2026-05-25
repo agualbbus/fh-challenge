@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from langchain.tools import ToolRuntime, tool
 from langchain_core.messages import ToolMessage
@@ -62,8 +62,13 @@ def forward_email() -> dict[str, Any]:
     return _ok(channel="email", message_id=f"forwarded-{uuid.uuid4()}")
 
 
+SlackAudience = Literal["internal", "broker", "customer"]
+
+
 @tool
-def send_slack_message(audience: str, message: str, escalation_type: str = "") -> dict[str, Any]:
+def send_slack_message(
+    audience: SlackAudience, message: str, escalation_type: str = ""
+) -> dict[str, Any]:
     """Send an internal or broker-visible Slack notification."""
     return _ok(channel="slack", message_id=f"slack-{uuid.uuid4()}")
 
@@ -94,8 +99,13 @@ def check_attachment(attachment_id: str, runtime: ToolRuntime) -> dict[str, Any]
     }
 
 
+LoadMilestone = Literal[
+    "on_route_to_delivery", "at_delivery", "delivered", "pod_collected"
+]
+
+
 @tool
-def update_load_state(target_state: str, runtime: ToolRuntime) -> Command:
+def update_load_state(target_state: LoadMilestone, runtime: ToolRuntime) -> Command:
     """Update the load milestone/state."""
     load_state = _runtime_load_state(runtime)
     previous = load_state.get("milestone", "on_route_to_delivery")
@@ -104,14 +114,25 @@ def update_load_state(target_state: str, runtime: ToolRuntime) -> Command:
     return _state_command(result, runtime, load_state=updated_load_state)
 
 
+EtaTarget = Literal["delivery"]
+TimerType = Literal[
+    "eta_followup", "pod_followup", "delivery_status_followup", "attachment_clarification"
+]
+
+
 @tool
-def update_eta(target_location: str, eta_utc: str) -> dict[str, Any]:
-    """Update the ETA for a target location."""
+def update_eta(target_location: EtaTarget, eta_utc: str) -> dict[str, Any]:
+    """Store a driver-provided ETA for the target location."""
     return _ok(target_location=target_location, eta_utc=eta_utc)
 
 
 @tool
-def create_timer(timer_type: str, fire_at_utc: str, runtime: ToolRuntime, timer_id: str = "") -> Command:
+def create_timer(
+    timer_type: TimerType,
+    fire_at_utc: str,
+    runtime: ToolRuntime,
+    timer_id: str = "",
+) -> Command:
     """Schedule a follow-up timer."""
     load_state = _runtime_load_state(runtime)
     load_id = load_state.get("load_id", "")
@@ -156,15 +177,21 @@ def cancel_timers(runtime: ToolRuntime, timer_type: str | None = None) -> Comman
     return _state_command(_ok(), runtime, active_timers=active_timers)
 
 
+TaskType = Literal[
+    "missing_load_info", "pod_review", "lumper_review", "manual_followup", "other"
+]
+IssueType = Literal["equipment_failure", "delivery_delay", "facility_problem", "other"]
+
+
 @tool
-def create_task(title: str, description: str, task_type: str) -> dict[str, Any]:
-    """Create an operational task for the team."""
+def create_task(title: str, description: str, task_type: TaskType) -> dict[str, Any]:
+    """Create a non-urgent human follow-up task."""
     return _ok(task_id=f"task-{uuid.uuid4()}")
 
 
 @tool
-def create_issue(title: str, description: str, issue_type: str) -> dict[str, Any]:
-    """Create an operational issue record."""
+def create_issue(title: str, description: str, issue_type: IssueType) -> dict[str, Any]:
+    """Create an urgent operational issue."""
     return _ok(issue_id=f"issue-{uuid.uuid4()}")
 
 
@@ -186,7 +213,9 @@ def validate_eta(eta_utc: str, target_location: str = "delivery") -> dict[str, A
 
 
 @tool
-def get_appointment_time(stop_type: str, runtime: ToolRuntime) -> dict[str, Any]:
+def get_appointment_time(
+    stop_type: Literal["pickup", "delivery"], runtime: ToolRuntime
+) -> dict[str, Any]:
     """Get appointment details for a pickup or delivery stop."""
     load_state = _runtime_load_state(runtime)
     load_data = load_state.get("load_data", {})

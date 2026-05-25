@@ -12,4 +12,6 @@ missing_load_info:
   notify_slack: false
 lumper:
   mode: forward_email
-first_arrival_message_key: ask_unloading_and_pod
+  review_task_fallback: true
+  enforce_pod_handling: true
+first_arrival_message: "Send unloading updates, POD, and any lumper receipt when available."
