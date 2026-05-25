@@ -86,5 +86,3 @@ def get_sop_document(task_type: str) -> str:
     if not path.exists():
         return ""
     return path.read_text(encoding="utf-8").strip()
-
-

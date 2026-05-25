@@ -23,9 +23,7 @@ def test_extract_tool_records_pairs_calls_with_results() -> None:
     messages = [
         AIMessage(
             content="",
-            tool_calls=[
-                {"name": "send_sms", "args": {"x": 1}, "id": "tc-1", "type": "tool_call"}
-            ],
+            tool_calls=[{"name": "send_sms", "args": {"x": 1}, "id": "tc-1", "type": "tool_call"}],
         ),
         ToolMessage(content='{"ok": true}', tool_call_id="tc-1"),
     ]
