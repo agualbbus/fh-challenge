@@ -23,3 +23,18 @@ output "database_url_hint" {
   value       = var.enable_aws_resources ? "postgresql://${var.db_username}:<password>@${aws_db_instance.watchtower[0].address}:${aws_db_instance.watchtower[0].port}/${var.db_name}" : null
   sensitive   = true
 }
+
+output "codepipeline_name" {
+  description = "CodePipeline name (when enable_cicd is true)."
+  value       = var.enable_aws_resources && var.enable_cicd ? aws_codepipeline.app[0].name : null
+}
+
+output "codebuild_project_name" {
+  description = "CodeBuild project name (when enable_cicd is true)."
+  value       = var.enable_aws_resources && var.enable_cicd ? aws_codebuild_project.app[0].name : null
+}
+
+output "pipeline_artifacts_bucket" {
+  description = "S3 bucket for CodePipeline artifacts (when enable_cicd is true)."
+  value       = var.enable_aws_resources && var.enable_cicd ? aws_s3_bucket.pipeline_artifacts[0].bucket : null
+}

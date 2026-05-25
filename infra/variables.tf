@@ -47,9 +47,39 @@ variable "image_tag" {
 }
 
 variable "model_mode" {
-  description = "MODEL_MODE env (mock | live)."
+  description = "MODEL_MODE env for ECS containers (mock | live). Worker and API use this value in AWS."
   type        = string
-  default     = "mock"
+  default     = "live"
+}
+
+variable "enable_cicd" {
+  description = "When true (and enable_aws_resources), provision CodePipeline + CodeBuild for GitHub → ECR → ECS."
+  type        = bool
+  default     = false
+}
+
+variable "github_owner" {
+  description = "GitHub org or user for CodeStar source connection."
+  type        = string
+  default     = ""
+}
+
+variable "github_repo" {
+  description = "GitHub repository name for CodeStar source connection."
+  type        = string
+  default     = ""
+}
+
+variable "github_branch" {
+  description = "Branch that triggers the deploy pipeline."
+  type        = string
+  default     = "main"
+}
+
+variable "codestar_connection_arn" {
+  description = "ARN of an authorized CodeStar Connections GitHub connection."
+  type        = string
+  default     = ""
 }
 
 variable "db_password" {
