@@ -23,7 +23,10 @@ data "aws_iam_policy_document" "github_deploy_assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:agualbbus/freight-hero:ref:refs/heads/main"]
+      values = [
+        for branch in var.github_deploy_branches :
+        "repo:agualbbus/freight-hero:ref:refs/heads/${branch}"
+      ]
     }
   }
 }

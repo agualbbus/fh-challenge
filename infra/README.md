@@ -36,7 +36,7 @@ terraform apply
 
 ## CI/CD
 
-Terraform provisions a GitHub OIDC provider and deploy IAM role (`freight-watchtower-github-deploy`). GitHub Actions (`.github/workflows/deploy.yml`) assumes that role on pushes to `main`, pushes images to ECR, and forces new ECS deployments. No CodePipeline or long-lived AWS keys in GitHub.
+Terraform provisions a GitHub OIDC provider and deploy IAM role (`freight-watchtower-github-deploy`). Trusted branches default to `github-ecs-setup` (test) and `main` (`var.github_deploy_branches`). GitHub Actions assumes the role via OIDC — test branch pushes only publish `:sha`; `main` (or manual `deploy_ecs=true`) also rolls ECS. No CodePipeline or long-lived AWS keys in GitHub.
 
 ## Secrets (AWS Secrets Manager)
 

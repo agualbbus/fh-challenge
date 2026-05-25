@@ -20,19 +20,25 @@ Or run the full stack: `docker compose up --build` (ensure `.dockerignore` exclu
 2. Copy `infra/app-secrets.json.example` → `infra/app-secrets.json` with `DATABASE_URL`, `SQS_QUEUE_URL`, `OPENROUTER_API_KEY`, `LANGSMITH_API_KEY`, `API_KEY`
 3. `terraform apply`
 4. Copy Terraform output `github_deploy_role_arn` into GitHub repo secret `AWS_DEPLOY_ROLE_ARN`
-5. Push to `main` (or run the **deploy** workflow manually) — GitHub Actions builds the image, pushes to ECR, and rolls both ECS services
+5. Test CI on branch `github-ecs-setup` (see below), then merge to `main` for production rollouts
 6. Run one fixture against the public URL; save evidence under `docs/evidence/`
 
 ### CI/CD (GitHub Actions)
 
-Every push to `main` runs [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml):
+Workflow: [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)
 
-1. Assume the AWS deploy role via OIDC (no long-lived AWS keys in GitHub)
-2. Build and push `freight-watchtower:<sha>` and `freight-watchtower:latest` to ECR
-3. `force-new-deployment` on `freight-watchtower-api` and `freight-watchtower-worker`
+**One-time setup:** after `terraform apply`, set GitHub secret `AWS_DEPLOY_ROLE_ARN` from `terraform output -raw github_deploy_role_arn`. OIDC trust allows `github-ecs-setup` and `main` (see `var.github_deploy_branches`).
+
+**Test branch (`github-ecs-setup`)** — push builds and pushes `freight-watchtower:<sha>` only (validates OIDC + ECR; does not update `:latest` or roll ECS).
+
+**Full deploy** — either push to `main`, or run **deploy** manually on `github-ecs-setup` with `deploy_ecs=true` (pushes `:latest` and force-deploys both services).
+
+**Production (`main`)** — every push:
+
+1. Assume the AWS deploy role via OIDC
+2. Build and push `freight-watchtower:<sha>` and `freight-watchtower:latest`
+3. `force-new-deployment` on API and worker
 4. Wait until both services are stable
-
-**One-time setup:** after `terraform apply`, set GitHub secret `AWS_DEPLOY_ROLE_ARN` from `terraform output -raw github_deploy_role_arn`.
 
 ### Manual deploy
 
