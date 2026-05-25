@@ -57,7 +57,7 @@ sequenceDiagram
     Graph->>Graph: select_branch on kind
     Graph->>Graph: event_node @task _invoke_agent
     Graph->>Agent: route_event / run_agent_for_event
-    Agent->>Agent: ALL_TOOLS mocked
+    Agent->>Agent: SOP-scoped tools mocked
     Graph->>PG: checkpoint merge
     Main->>SQS: delete on success
 ```
@@ -107,7 +107,7 @@ flowchart LR
         sopPrompt --> sopFile["app/sops/*.md section"]
         sopPrompt --> profile["CustomerProfile YAML"]
     end
-    buildAgent --> tools["app/tools/tools.py ALL_TOOLS"]
+    buildAgent --> tools["sops.tools_for_sop(active_task)"]
     runAgent --> extract["tool_extraction.extract_tool_records to checkpoint"]
 ```
 
@@ -138,6 +138,7 @@ Tests and evals read checkpoints through [`query_load_state`](graph.py), includi
 | Tool call recording | `tool_extraction.extract_tool_records` parses model/tool messages and stores records in `tool_calls`. | Evals assert the trajectory from Postgres state, not only from LangSmith traces. |
 | SOP prompt | The prompt is built section-by-section (`_role_block`, `_routing_rules_block`, `_context_block`, `_format_customer_profile`, `_sop_block`, `_load_state_block`, `_event_block`, `_examples_block`, `_output_contract_block` in `agent.py`) using XML-style tags around each section, with the customer profile rendered as a bullet list and the full active-task SOP markdown inside `<sop>...</sop>`. The agent must first call tools and then end with one plain-text message of the form `SUMMARY: ...` / `RATIONALE: ...`; `parse_final_answer` extracts both via regex from the last `AIMessage`. We deliberately do NOT bind `response_format=` to `create_agent` because that pulls models straight to the structured output and skips the tool loop. `active_task` must be set on `load_state` (no silent default) or prompt construction raises. | The agent picks the SOP section; Python no longer pre-selects one. |
 | SOP selection | `task_for_milestone(milestone)` in `sops.py` maps `on_route_to_delivery → delivery_eta_checkpoint` and `at_delivery/delivered/pod_collected → confirm_delivery`. Applied in `seed_node`; overridable by `/submit-task`. | Fixtures choose the SOP via `initial_state` without needing a separate task submission. |
+| SOP-scoped tools | `tools_for_sop(active_task)` in `sops.py` returns the subset of `app/tools/tools.py` that the active SOP authorizes (`_SOP_TOOL_NAMES`). `build_agent(active_task)` passes that subset to `create_agent` instead of `ALL_TOOLS`. ETA SOP drops `check_attachment`/`forward_email`; confirm-delivery SOP drops `update_eta`/`validate_eta`/`get_appointment_time`. `send_email` is in neither set. | Removes a class of wrong-tool failures by aligning the bound tool surface with the SOP that was already selected deterministically. |
 | Narrow event routing | Unsupported event types return `noop` with `sop=no_action`. | Phase 4+ fixtures are still pending. |
 | Timer branch | `kind=timer` returns `noop` (no agent invocation). | ETA follow-up agent behavior has not been implemented yet. |
 | Task branch | `kind=task` only sets `active_task`. | Task submission activates the workflow but does not yet trigger a separate agent decision. |
