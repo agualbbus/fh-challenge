@@ -20,7 +20,6 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 
 
-
 from app.queue.messages import WorkMessage
 from app.worker.agent import route_event
 from app.worker.nodes import (
@@ -70,9 +69,7 @@ def invoke_input(load_id: str, kind: str, payload: dict[str, Any]) -> LoadGraphS
     return {"load_id": load_id, "kind": kind, "payload": payload}
 
 
-async def process_work_message(
-    checkpointer: BaseCheckpointSaver, message: WorkMessage
-) -> None:
+async def process_work_message(checkpointer: BaseCheckpointSaver, message: WorkMessage) -> None:
     graph = build_graph(checkpointer)
     logger.info(
         "Processing work message load_id=%s kind=%s dedup_id=%s",
@@ -95,9 +92,7 @@ async def process_work_message(
         raise
 
 
-async def query_load_state(
-    checkpointer: BaseCheckpointSaver, load_id: str
-) -> dict[str, Any]:
+async def query_load_state(checkpointer: BaseCheckpointSaver, load_id: str) -> dict[str, Any]:
     """Read checkpointed state for eval assertions."""
     graph = build_graph(checkpointer)
     snap = await graph.aget_state(graph_config(load_id))

@@ -28,6 +28,7 @@ async def main() -> None:
     )
 
     try:
+
         async def on_message(msg: WorkMessage) -> None:
             await process_work_message(checkpointer, msg)
 

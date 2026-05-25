@@ -32,7 +32,9 @@ write_router = APIRouter(dependencies=[Depends(require_api_key)])
 
 def _publish(load_id: str, kind: str, payload: dict, dedup_id: str) -> AcceptedResponse:
     try:
-        publish_work_item(WorkMessage(load_id=load_id, kind=kind, payload=payload, dedup_id=dedup_id))
+        publish_work_item(
+            WorkMessage(load_id=load_id, kind=kind, payload=payload, dedup_id=dedup_id)
+        )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return AcceptedResponse(load_id=load_id, workflow_id=thread_id_for_load(load_id))

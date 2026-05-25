@@ -68,8 +68,7 @@ async def run_consumer(handler: MessageHandler) -> None:
                 # Transient handler failure: leave the message so SQS redelivers
                 # (and eventually moves it to the DLQ via max-receive-count).
                 logger.exception(
-                    "Handler failed; message will be retried "
-                    "load_id=%s kind=%s message_id=%s",
+                    "Handler failed; message will be retried load_id=%s kind=%s message_id=%s",
                     work.load_id,
                     work.kind,
                     message_id,

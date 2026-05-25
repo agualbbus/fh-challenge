@@ -48,9 +48,7 @@ def get_settings() -> Settings:
         aws_region=_env("AWS_REGION", "us-east-1"),
         aws_endpoint_url=endpoint if endpoint else None,
         openrouter_api_key=or_key if or_key else None,
-        openrouter_model_primary=_env(
-            "OPENROUTER_MODEL_PRIMARY", "z-ai/glm-5.1"
-        ),
+        openrouter_model_primary=_env("OPENROUTER_MODEL_PRIMARY", "z-ai/glm-5.1"),
         openrouter_model_fallback=_env("OPENROUTER_MODEL_FALLBACK", "z-ai/glm-5.1"),
         openrouter_base_url=_env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
         openrouter_http_referer=_env(
