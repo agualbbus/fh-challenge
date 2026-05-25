@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # a Pydantic schema makes the model skip the tool loop on most providers.
 _SUMMARY_RE = re.compile(r"^\s*SUMMARY\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 _RATIONALE_RE = re.compile(r"^\s*RATIONALE\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+_NOOP_SUMMARY = "No action."
 
 
 def _message_text(msg: Any) -> str:
@@ -229,6 +230,45 @@ def build_agent():
     )
 
 
+def _agent_trace_config(load_state: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
+    """LangSmith run_name/tags/metadata so the agent root isn't just 'LangGraph'."""
+    customer_id = load_state.get("customer_id") or "unknown"
+    active_task = load_state.get("active_task") or "unknown"
+    event_type = event.get("event_type") or "event"
+    inbound = event.get("inbound_communication") or {}
+
+    run_name = f"agent.{active_task}.{event_type}"
+    if sender := inbound.get("sender_type"):
+        run_name += f".{sender}"
+
+    tags = [
+        f"customer:{customer_id}",
+        f"task:{active_task}",
+        f"event_type:{event_type}",
+        f"load:{load_state.get('load_id', 'unknown')}",
+    ]
+    if channel := inbound.get("channel"):
+        tags.append(f"channel:{channel}")
+    if sender := inbound.get("sender_type"):
+        tags.append(f"sender:{sender}")
+
+    metadata = {
+        "load_id": load_state.get("load_id"),
+        "customer_id": customer_id,
+        "active_task": active_task,
+        "milestone": load_state.get("milestone"),
+        "event_id": event.get("event_id"),
+        "event_type": event_type,
+        "channel": inbound.get("channel"),
+        "sender_type": inbound.get("sender_type"),
+    }
+    return {
+        "run_name": run_name,
+        "tags": tags,
+        "metadata": {k: v for k, v in metadata.items() if v is not None},
+    }
+
+
 async def run_agent_for_event(
     load_state: dict[str, Any],
     active_timers: dict[str, dict[str, Any]],
@@ -249,6 +289,7 @@ async def run_agent_for_event(
                 "active_timers": active_timers,
                 "current_event": event,
             },
+            _agent_trace_config(load_state, event),
         )
     except Exception as exc:
         # Surface a structured failure rather than crashing the graph. SQS
@@ -263,7 +304,7 @@ async def run_agent_for_event(
         return AgentDecision(
             noop=True,
             reason=f"agent invocation error: {type(exc).__name__}: {exc}",
-            summary="No action.",
+            summary=_NOOP_SUMMARY,
             rationale="agent invocation raised an exception",
         )
     finally:
@@ -278,7 +319,7 @@ async def run_agent_for_event(
         return AgentDecision(
             noop=True,
             reason=f"tool-call extraction error: {type(exc).__name__}: {exc}",
-            summary="No action.",
+            summary=_NOOP_SUMMARY,
             rationale="failed to parse tool-call trajectory from agent messages",
             messages=messages,
         )
@@ -320,7 +361,7 @@ async def route_event(
             return AgentDecision(
                 noop=True,
                 reason="broker message ignored",
-                summary="No action.",
+                summary=_NOOP_SUMMARY,
                 rationale="broker-originated inbound; ignored per SOP",
             )
         return await run_agent_for_event(load_state, active_timers or {}, event)

@@ -38,7 +38,7 @@ def task_node(state: LoadGraphState) -> dict[str, Any]:
     return {"load_state": merge_load_data(existing, {"active_task": task_type})}
 
 
-def timer_node(state: LoadGraphState) -> dict[str, Any]:
+def timer_node(_state: LoadGraphState) -> dict[str, Any]:
     # Phase 4+ will dispatch by timer_type. Until then, firing is observed via checkpoint only.
     return {}
 

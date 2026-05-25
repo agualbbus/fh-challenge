@@ -18,7 +18,7 @@ def _expected_key() -> str | None:
     return key or None
 
 
-async def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
     expected = _expected_key()
     if expected is None:
         return

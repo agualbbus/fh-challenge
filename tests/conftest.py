@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+import os
+
+# Disable LangSmith / LangChain tracing during tests. Set before any langchain
+# imports so the client never starts a background tracer or contacts the API.
+for _var in ("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2", "LANGCHAIN_TRACING"):
+    os.environ[_var] = "false"
+for _var in ("LANGSMITH_API_KEY", "LANGCHAIN_API_KEY"):
+    os.environ.pop(_var, None)
+
 import pytest
 
 

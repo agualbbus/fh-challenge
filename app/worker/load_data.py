@@ -22,36 +22,47 @@ def format_address(address: dict[str, Any]) -> str:
     return ", ".join(p for p in parts if p)
 
 
+def _pickup_reference(load_data: dict[str, Any]) -> str | None:
+    for stop in load_data.get("stops", []):
+        if stop.get("type") == "pickup":
+            return stop.get("reference_numbers", {}).get("pickup")
+    return None
+
+
+def _driver_contact(load_data: dict[str, Any]) -> str | None:
+    driver = load_data.get("contacts", {}).get("driver", {})
+    phone = driver.get("phone")
+    if phone:
+        return phone
+    name = " ".join(p for p in [driver.get("first_name"), driver.get("last_name")] if p)
+    return name or None
+
+
+def _delivery_appointment(delivery: dict[str, Any]) -> str | None:
+    appt = delivery.get("appointment", {})
+    start = appt.get("start_utc")
+    if not start:
+        return None
+    return f"{start} ({appt.get('timezone', '')})"
+
+
 def get_load_field(load_data: dict[str, Any], field: str) -> str | None:
     delivery = get_delivery_stop(load_data)
     if delivery is None:
         return None
 
-    if field == "delivery_address":
-        return format_address(delivery.get("address", {}))
-    if field == "receiver_phone":
-        return delivery.get("reference_numbers", {}).get("receiver_phone")
-    if field == "delivery_reference":
-        return delivery.get("reference_numbers", {}).get("delivery")
+    delivery_resolvers = {
+        "delivery_address": lambda: format_address(delivery.get("address", {})),
+        "receiver_phone": lambda: delivery.get("reference_numbers", {}).get("receiver_phone"),
+        "delivery_reference": lambda: delivery.get("reference_numbers", {}).get("delivery"),
+        "delivery_appointment": lambda: _delivery_appointment(delivery),
+    }
+    if field in delivery_resolvers:
+        return delivery_resolvers[field]()
     if field == "pickup_reference":
-        for stop in load_data.get("stops", []):
-            if stop.get("type") == "pickup":
-                return stop.get("reference_numbers", {}).get("pickup")
-        return None
+        return _pickup_reference(load_data)
     if field == "driver_contact":
-        driver = load_data.get("contacts", {}).get("driver", {})
-        phone = driver.get("phone")
-        if phone:
-            return phone
-        name = " ".join(p for p in [driver.get("first_name"), driver.get("last_name")] if p)
-        return name or None
-    if field == "delivery_appointment":
-        appt = delivery.get("appointment", {})
-        start = appt.get("start_utc")
-        tz = appt.get("timezone", "")
-        if start:
-            return f"{start} ({tz})"
-        return None
+        return _driver_contact(load_data)
     return None
 
 

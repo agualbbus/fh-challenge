@@ -16,7 +16,7 @@ test:
 	uv run pytest
 
 coverage:
-	uv run pytest --cov=app --cov-report=term-missing --cov-report=html --cov-report=xml
+	uv run pytest --cov --cov-report=term-missing --cov-report=html --cov-report=xml
 
 eval:
 	uv run python evals/run_evals.py

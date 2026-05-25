@@ -27,6 +27,7 @@ from app.queue.publisher import publish_work_item
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+_PUBLISH_FAILURE_RESPONSES = {502: {"description": "Failed to publish work item to SQS"}}
 write_router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
@@ -83,15 +84,15 @@ async def health() -> dict:
     return body
 
 
-@write_router.post("/loads", status_code=status.HTTP_202_ACCEPTED, response_model=AcceptedResponse)
+@write_router.post(
+    "/loads", status_code=status.HTTP_202_ACCEPTED, responses=_PUBLISH_FAILURE_RESPONSES
+)
 async def create_load(body: LoadSeedRequest) -> AcceptedResponse:
     return _publish(body.load_id, "seed", _seed_from_load(body), dedup_id_for_seed(body.load_id))
 
 
 @write_router.post(
-    "/submit-task",
-    status_code=status.HTTP_202_ACCEPTED,
-    response_model=AcceptedResponse,
+    "/submit-task", status_code=status.HTTP_202_ACCEPTED, responses=_PUBLISH_FAILURE_RESPONSES
 )
 async def submit_task(body: SubmitTaskRequest) -> AcceptedResponse:
     payload = body.model_dump(mode="json")
@@ -101,7 +102,7 @@ async def submit_task(body: SubmitTaskRequest) -> AcceptedResponse:
 @write_router.post(
     "/events/inbound-communication",
     status_code=status.HTTP_202_ACCEPTED,
-    response_model=AcceptedResponse,
+    responses=_PUBLISH_FAILURE_RESPONSES,
 )
 async def inbound_communication(body: InboundCommunicationEvent) -> AcceptedResponse:
     payload = body.model_dump(mode="json")
@@ -109,9 +110,7 @@ async def inbound_communication(body: InboundCommunicationEvent) -> AcceptedResp
 
 
 @write_router.post(
-    "/events/tracking",
-    status_code=status.HTTP_202_ACCEPTED,
-    response_model=AcceptedResponse,
+    "/events/tracking", status_code=status.HTTP_202_ACCEPTED, responses=_PUBLISH_FAILURE_RESPONSES
 )
 async def tracking_event(body: TrackingEvent) -> AcceptedResponse:
     payload = body.model_dump(mode="json")
@@ -121,7 +120,7 @@ async def tracking_event(body: TrackingEvent) -> AcceptedResponse:
 @write_router.post(
     "/events/load-update",
     status_code=status.HTTP_202_ACCEPTED,
-    response_model=AcceptedResponse,
+    responses=_PUBLISH_FAILURE_RESPONSES,
 )
 async def load_update(body: LoadUpdateEvent) -> AcceptedResponse:
     payload = body.model_dump(mode="json")

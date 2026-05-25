@@ -69,6 +69,42 @@ def invoke_input(load_id: str, kind: str, payload: dict[str, Any]) -> LoadGraphS
     return {"load_id": load_id, "kind": kind, "payload": payload}
 
 
+def _trace_config_for_message(message: WorkMessage) -> dict[str, Any]:
+    """Per-invocation LangSmith config: descriptive root name + filterable tags/metadata."""
+    payload = message.payload or {}
+    event_type = payload.get("event_type") if message.kind == "event" else None
+    inbound = payload.get("inbound_communication") or {} if message.kind == "event" else {}
+    detail = event_type or payload.get("task_instruction_type") or payload.get("timer_type") or ""
+    run_name = f"watchtower.{message.kind}" + (f".{detail}" if detail else "")
+
+    tags = [f"kind:{message.kind}", f"load:{message.load_id}"]
+    if event_type:
+        tags.append(f"event_type:{event_type}")
+    if channel := inbound.get("channel"):
+        tags.append(f"channel:{channel}")
+    if sender := inbound.get("sender_type"):
+        tags.append(f"sender:{sender}")
+
+    metadata: dict[str, Any] = {
+        "load_id": message.load_id,
+        "kind": message.kind,
+        "dedup_id": message.dedup_id,
+    }
+    if event_type:
+        metadata["event_type"] = event_type
+        metadata["event_id"] = payload.get("event_id")
+    if inbound:
+        metadata["channel"] = inbound.get("channel")
+        metadata["sender_type"] = inbound.get("sender_type")
+
+    return {
+        "configurable": {"thread_id": thread_id_for_load(message.load_id)},
+        "run_name": run_name,
+        "tags": tags,
+        "metadata": {k: v for k, v in metadata.items() if v is not None},
+    }
+
+
 async def process_work_message(checkpointer: BaseCheckpointSaver, message: WorkMessage) -> None:
     graph = build_graph(checkpointer)
     logger.info(
@@ -80,7 +116,7 @@ async def process_work_message(checkpointer: BaseCheckpointSaver, message: WorkM
     try:
         await graph.ainvoke(
             invoke_input(message.load_id, message.kind, message.payload),
-            graph_config(message.load_id),
+            _trace_config_for_message(message),
             durability="sync",
         )
     except Exception:

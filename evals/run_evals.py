@@ -6,7 +6,6 @@ import asyncio
 import copy
 import json
 import sys
-import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -30,7 +29,7 @@ MOCK_CASES = {
 }
 
 
-def _apply_patch(obj: Any, path: str, value: Any) -> None:
+def _parse_path(path: str) -> list[str | int]:
     parts: list[str | int] = []
     current = ""
     i = 0
@@ -41,20 +40,23 @@ def _apply_patch(obj: Any, path: str, value: Any) -> None:
                 parts.append(current)
                 current = ""
             i += 1
-            continue
-        if ch == "[":
+        elif ch == "[":
             if current:
                 parts.append(current)
                 current = ""
             j = path.index("]", i)
             parts.append(int(path[i + 1 : j]))
             i = j + 1
-            continue
-        current += ch
-        i += 1
+        else:
+            current += ch
+            i += 1
     if current:
         parts.append(current)
+    return parts
 
+
+def _apply_patch(obj: Any, path: str, value: Any) -> None:
+    parts = _parse_path(path)
     target = obj
     for part in parts[:-1]:
         target = target[part]
@@ -92,16 +94,20 @@ async def _query_load_state(load_id: str) -> dict[str, Any]:
     return await query_load_state(cp, load_id)
 
 
-async def _wait_for_tools(load_id: str, min_count: int, timeout: float = 30.0) -> dict[str, Any]:
-    deadline = time.monotonic() + timeout
+async def _wait_for_tools(
+    load_id: str, min_count: int, timeout_seconds: float = 30.0
+) -> dict[str, Any]:
     last: dict[str, Any] = {}
-    while time.monotonic() < deadline:
-        last = await _query_load_state(load_id)
-        milestone = last.get("milestone") or last.get("load_state", {}).get("milestone")
-        if milestone and len(last.get("tool_calls", [])) >= min_count:
-            return last
-        await asyncio.sleep(0.5)
-    return last
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            while True:
+                last = await _query_load_state(load_id)
+                milestone = last.get("milestone") or last.get("load_state", {}).get("milestone")
+                if milestone and len(last.get("tool_calls", [])) >= min_count:
+                    return last
+                await asyncio.sleep(0.5)
+    except TimeoutError:
+        return last
 
 
 async def run_case(
