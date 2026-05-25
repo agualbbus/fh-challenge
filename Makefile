@@ -1,7 +1,11 @@
-.PHONY: install dev-api dev-worker test coverage eval eval-reset sonar-up sonar-scan sonar-test help
+.PHONY: install dev-api dev-worker test coverage eval eval-reset lint-fix sonar-up sonar-scan sonar-test help
 
 help:
-	@echo "Targets: install dev-api dev-worker test coverage eval eval-reset sonar-up sonar-scan sonar-test"
+	@echo "Targets: install dev-api dev-worker test coverage eval eval-reset lint-fix sonar-up sonar-scan sonar-test"
+
+lint-fix:
+	uv run ruff check --fix .
+	uv run ruff format .
 
 install:
 	uv sync
