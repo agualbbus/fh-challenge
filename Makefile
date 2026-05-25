@@ -1,7 +1,7 @@
-.PHONY: install dev-api dev-worker test coverage eval sonar-up sonar-scan sonar-test help
+.PHONY: install dev-api dev-worker test coverage eval eval-reset sonar-up sonar-scan sonar-test help
 
 help:
-	@echo "Targets: install dev-api dev-worker test coverage eval sonar-up sonar-scan sonar-test"
+	@echo "Targets: install dev-api dev-worker test coverage eval eval-reset sonar-up sonar-scan sonar-test"
 
 install:
 	uv sync
@@ -20,6 +20,9 @@ coverage:
 
 eval:
 	uv run python evals/run_evals.py
+
+eval-reset:
+	uv run python -m evals.reset
 
 sonar-up:
 	docker compose -f docker-compose.sonar.yml up -d

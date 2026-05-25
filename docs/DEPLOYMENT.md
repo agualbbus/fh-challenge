@@ -8,7 +8,7 @@
 4. Terminal B: `uv run python -m app.worker`
 5. `uv run python evals/run_evals.py`
 
-Copy `.env.example` → `.env`. Use `MODEL_MODE=mock` for evals without OpenRouter keys.
+Copy `.env.example` → `.env` and set `OPENROUTER_API_KEY` — the agent path always calls OpenRouter.
 
 Or run the full stack: `docker compose up --build` (ensure `.dockerignore` excludes `.venv`).
 

@@ -46,12 +46,6 @@ variable "image_tag" {
   default     = "latest"
 }
 
-variable "model_mode" {
-  description = "MODEL_MODE env (mock | live)."
-  type        = string
-  default     = "mock"
-}
-
 variable "db_password" {
   description = "PostgreSQL master password (override via TF_VAR_db_password)."
   type        = string

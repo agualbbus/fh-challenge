@@ -16,3 +16,4 @@ class LoadGraphState(TypedDict, total=False):
     session: dict[str, Any]
     tool_calls: Annotated[list[dict[str, Any]], operator.add]
     active_timers: dict[str, dict[str, Any]]
+    messages: list[Any]

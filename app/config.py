@@ -20,7 +20,6 @@ class Settings:
     sqs_queue_url: str
     aws_region: str
     aws_endpoint_url: str | None
-    model_mode: str
     openrouter_api_key: str | None
     openrouter_model_primary: str
     openrouter_model_fallback: str
@@ -48,7 +47,6 @@ def get_settings() -> Settings:
         ),
         aws_region=_env("AWS_REGION", "us-east-1"),
         aws_endpoint_url=endpoint if endpoint else None,
-        model_mode=_env("MODEL_MODE", "mock"),
         openrouter_api_key=or_key if or_key else None,
         openrouter_model_primary=_env(
             "OPENROUTER_MODEL_PRIMARY", "z-ai/glm-5.1"

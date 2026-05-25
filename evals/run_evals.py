@@ -7,6 +7,7 @@ import copy
 import json
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -57,16 +58,24 @@ def _apply_patch(obj: Any, path: str, value: Any) -> None:
     target = obj
     for part in parts[:-1]:
         target = target[part]
-    target[parts[-1]] = value
+    leaf = parts[-1]
+    # Null at a leaf means "absent" (matches the canonical schema which forbids
+    # null values for string fields); pop rather than set None.
+    if value is None and isinstance(target, dict) and isinstance(leaf, str):
+        target.pop(leaf, None)
+    else:
+        target[leaf] = value
 
 
-def _build_load_seed(case: dict[str, Any], base_load: dict[str, Any]) -> dict[str, Any]:
+def _build_load_seed(
+    case: dict[str, Any], base_load: dict[str, Any], run_id: str
+) -> dict[str, Any]:
     load_data = copy.deepcopy(base_load["load_data"])
     for path, value in (case.get("load_data_patch") or {}).items():
         _apply_patch(load_data, path, value)
 
     return {
-        "load_id": f"eval-{case['id']}",
+        "load_id": f"eval-{case['id']}-{run_id}",
         "customer_id": case.get("customer_id", base_load["customer_id"]),
         "initial_state": case.get("initial_state", base_load["initial_state"]),
         "load_data": load_data,
@@ -99,8 +108,9 @@ async def run_case(
     client: httpx.AsyncClient,
     case: dict[str, Any],
     base_load: dict[str, Any],
+    run_id: str,
 ) -> tuple[bool, list[str]]:
-    seed = _build_load_seed(case, base_load)
+    seed = _build_load_seed(case, base_load, run_id)
     load_id = seed["load_id"]
     errors: list[str] = []
 
@@ -112,6 +122,10 @@ async def run_case(
         event_payload = copy.deepcopy(event)
         event_payload["load_id"] = load_id
         event_payload["customer_id"] = seed["customer_id"]
+        # Suffix event_id with run_id so SQS FIFO dedup (5-min window) does not
+        # swallow repeat eval runs that reuse fixture event_ids.
+        if event_payload.get("event_id"):
+            event_payload["event_id"] = f"{event_payload['event_id']}-{run_id}"
         path = {
             "inbound_communication": "/events/inbound-communication",
             "tracking": "/events/tracking",
@@ -138,6 +152,11 @@ async def run_all(api_base: str, case_filter: set[str] | None = None) -> int:
     if case_filter:
         cases = [c for c in cases if c["id"] in case_filter]
 
+    # Per-run suffix isolates this harness invocation from prior runs:
+    # avoids LangGraph checkpoint accumulation and SQS FIFO dedup hits.
+    run_id = uuid.uuid4().hex[:8]
+    print(f"Eval run_id: {run_id}", file=sys.stderr)
+
     results: list[tuple[str, bool, list[str]]] = []
     async with httpx.AsyncClient(base_url=api_base, timeout=30.0) as client:
         health = await client.get("/health")
@@ -146,7 +165,7 @@ async def run_all(api_base: str, case_filter: set[str] | None = None) -> int:
             return 1
 
         for case in cases:
-            ok, errors = await run_case(client, case, base_load)
+            ok, errors = await run_case(client, case, base_load, run_id)
             results.append((case["id"], ok, errors))
             status = "PASS" if ok else "FAIL"
             print(f"{status} {case['id']}")

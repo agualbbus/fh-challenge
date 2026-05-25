@@ -13,10 +13,13 @@ Public surface — what every importer in the repo depends on:
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
+
+
 
 from app.queue.messages import WorkMessage
 from app.worker.agent import route_event
@@ -29,6 +32,8 @@ from app.worker.nodes import (
     timer_node,
 )
 from app.worker.state import LoadGraphState
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "build_graph",
@@ -69,11 +74,25 @@ async def process_work_message(
     checkpointer: BaseCheckpointSaver, message: WorkMessage
 ) -> None:
     graph = build_graph(checkpointer)
-    await graph.ainvoke(
-        invoke_input(message.load_id, message.kind, message.payload),
-        graph_config(message.load_id),
-        durability="sync",
+    logger.info(
+        "Processing work message load_id=%s kind=%s dedup_id=%s",
+        message.load_id,
+        message.kind,
+        message.dedup_id,
     )
+    try:
+        await graph.ainvoke(
+            invoke_input(message.load_id, message.kind, message.payload),
+            graph_config(message.load_id),
+            durability="sync",
+        )
+    except Exception:
+        logger.exception(
+            "Graph invocation failed load_id=%s kind=%s",
+            message.load_id,
+            message.kind,
+        )
+        raise
 
 
 async def query_load_state(

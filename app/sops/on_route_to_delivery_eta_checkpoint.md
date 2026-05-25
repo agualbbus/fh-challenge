@@ -83,7 +83,7 @@ Expected behavior:
 
 1. Look for the requested information in the known load data.
 2. If the information is available, reply on the same channel with only the requested information.
-3. If the information is missing, follow the customer's missing-information workflow for acknowledgment, human follow-up, and any required visibility.
+3. If the information is missing, reply on the same channel acknowledging that the team is **checking** on it, then follow the customer's missing-information workflow for human follow-up and any required visibility (task creation, slack audience).
 
 ## Operational Issue
 
@@ -102,7 +102,7 @@ Expected behavior:
 
 1. Treat the message as an operational exception that needs operations-team attention.
 2. Use the most specific issue category that fits the message.
-3. If the driver sent the message by SMS, acknowledge briefly that the team will review.
+3. If the driver sent the message by SMS, acknowledge briefly on the same channel — the reply must include the word **review** (e.g. "the team will review and follow up").
 4. Do not give long troubleshooting advice.
 
 ## Broker Messages

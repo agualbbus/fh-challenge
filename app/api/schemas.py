@@ -5,9 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 from app.customers.base import validate_customer_id
+
+_STRICT = ConfigDict(extra="forbid")
 
 CustomerId = Annotated[str, Field(min_length=1), BeforeValidator(validate_customer_id)]
 LoadState = Literal["on_route_to_delivery", "at_delivery", "delivered", "pod_collected"]
@@ -19,11 +21,13 @@ SenderType = Literal[
 
 
 class Company(BaseModel):
+    model_config = _STRICT
     name: str
     uuid: str | None = None
 
 
 class PersonContact(BaseModel):
+    model_config = _STRICT
     first_name: str | None = None
     last_name: str | None = None
     phone: str | None = None
@@ -32,6 +36,7 @@ class PersonContact(BaseModel):
 
 
 class Address(BaseModel):
+    model_config = _STRICT
     line_1: str
     line_2: str | None = None
     city: str
@@ -41,6 +46,7 @@ class Address(BaseModel):
 
 
 class Appointment(BaseModel):
+    model_config = _STRICT
     type: Literal["fixed", "window", "fcfs"]
     start_utc: datetime | None = None
     end_utc: datetime | None = None
@@ -48,21 +54,25 @@ class Appointment(BaseModel):
 
 
 class Coordinates(BaseModel):
+    model_config = _STRICT
     lat: float = Field(ge=-90, le=90)
     lng: float = Field(ge=-180, le=180)
 
 
 class Stop(BaseModel):
+    model_config = _STRICT
     stop_id: str
     type: Literal["pickup", "delivery"]
     status: str | None = None
     address: Address
     appointment: Appointment
     coordinates: Coordinates
-    reference_numbers: dict[str, str | None] = Field(default_factory=dict)
+    reference_numbers: dict[str, str] = Field(default_factory=dict)
 
 
 class LoadData(BaseModel):
+    # `additionalProperties: true` per challenge-input.schema.json — keep open.
+    model_config = ConfigDict(extra="allow")
     external_load_id: str
     po_number: str | None = None
     instructions: str | None = None
@@ -70,10 +80,9 @@ class LoadData(BaseModel):
     contacts: dict[str, PersonContact] = Field(default_factory=dict)
     stops: list[Stop]
 
-    model_config = {"extra": "allow"}
-
 
 class LoadSeedRequest(BaseModel):
+    model_config = _STRICT
     load_id: str
     customer_id: CustomerId
     load_data: LoadData
@@ -81,6 +90,7 @@ class LoadSeedRequest(BaseModel):
 
 
 class SubmitTaskRequest(BaseModel):
+    model_config = _STRICT
     task_uuid: str
     load_id: str
     customer_id: CustomerId
@@ -91,6 +101,7 @@ class SubmitTaskRequest(BaseModel):
 
 
 class Attachment(BaseModel):
+    model_config = _STRICT
     attachment_id: str
     file_name: str
     mime_type: str | None = None
@@ -98,6 +109,7 @@ class Attachment(BaseModel):
 
 
 class InboundCommunication(BaseModel):
+    model_config = _STRICT
     channel: Channel
     sender_type: SenderType
     sender_name: str | None = None
@@ -106,6 +118,7 @@ class InboundCommunication(BaseModel):
 
 
 class InboundCommunicationEvent(BaseModel):
+    model_config = _STRICT
     event_id: str
     event_type: Literal["inbound_communication"] = "inbound_communication"
     load_id: str
@@ -115,6 +128,7 @@ class InboundCommunicationEvent(BaseModel):
 
 
 class TrackingPing(BaseModel):
+    model_config = _STRICT
     tracking_id: str
     lat: float = Field(ge=-90, le=90)
     lng: float = Field(ge=-180, le=180)
@@ -124,6 +138,7 @@ class TrackingPing(BaseModel):
 
 
 class TrackingEvent(BaseModel):
+    model_config = _STRICT
     event_id: str
     event_type: Literal["tracking"] = "tracking"
     load_id: str
@@ -133,12 +148,14 @@ class TrackingEvent(BaseModel):
 
 
 class LoadUpdatePayload(BaseModel):
+    model_config = _STRICT
     milestone_state: LoadState | None = None
     load_data_patch: dict[str, Any] | None = None
     reason: str | None = None
 
 
 class LoadUpdateEvent(BaseModel):
+    model_config = _STRICT
     event_id: str
     event_type: Literal["load_update"] = "load_update"
     load_id: str

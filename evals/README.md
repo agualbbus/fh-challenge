@@ -13,10 +13,10 @@ Run it with:
 uv run python -m evals.run_evals
 ```
 
-Requires: API (`:8000`), worker, Postgres, and ElasticMQ/SQS all up, with
-`MODEL_MODE=mock` so the deterministic fixture LLM
-([`../app/worker/mock_model.py`](../app/worker/mock_model.py)) drives tool
-calls.
+Requires: API (`:8000`), worker, Postgres, and ElasticMQ/SQS all up, plus an
+`OPENROUTER_API_KEY` so the worker can drive the live OpenRouter agent.
+Assertions tolerate some live-model variation; pin temperature low if cases
+flake.
 
 ## Files
 
@@ -34,7 +34,6 @@ Runtime dependencies:
 | [`../app/api/routes.py`](../app/api/routes.py) | Write endpoints the harness posts to (`/loads`, `/events/inbound-communication`, `/events/tracking`, `/events/load-update`). |
 | [`../app/worker/graph.py`](../app/worker/graph.py) | `query_load_state` reads checkpoint state for assertions. |
 | [`../app/worker/checkpointer.py`](../app/worker/checkpointer.py) | `init_checkpointer` opens the `AsyncPostgresSaver`. |
-| [`../app/worker/mock_model.py`](../app/worker/mock_model.py) | Deterministic fixture LLM driving tool calls (parallel surface to the live OpenRouter path). |
 
 ## Allow-Listed Cases
 
@@ -79,7 +78,7 @@ sequenceDiagram
     Worker->>Graph: ainvoke (seed)
     Graph->>PG: checkpoint milestone, load_data
     Worker->>Graph: ainvoke (event)
-    Graph->>Graph: route_event -> mock LLM -> tools
+    Graph->>Graph: route_event -> OpenRouter LLM -> tools
     Graph->>PG: checkpoint tool_calls
     loop until milestone set AND tool count >= expected
         Harness->>PG: query_load_state(load_id)
@@ -162,13 +161,14 @@ seed message landed and falsely fail the `expected_state` assertion.
 - **Live stack required.** The harness needs API, worker, Postgres, and
   SQS/ElasticMQ up. Missing the worker presents as the polling loop timing out
   after 30s with no `tool_calls`.
-- **`MODEL_MODE=mock` only.** Live OpenRouter responses are nondeterministic
-  and will not satisfy the strict tool-call assertions. CI must stay on mock.
-- **Adding a fixture is two surfaces minimum.** Update
-  [`fixtures/test-cases.json`](fixtures/test-cases.json) **and** the relevant
-  runtime path (router in [`../app/worker/agent.py`](../app/worker/agent.py),
-  keyword/branch in [`../app/worker/mock_model.py`](../app/worker/mock_model.py),
-  any new tools in [`../app/tools/tools.py`](../app/tools/tools.py)) before
-  promoting the ID into `MOCK_CASES`.
+- **Live model variance.** OpenRouter responses are nondeterministic; pin
+  temperature low and accept some tolerance in tool-call assertions, or trim
+  the assertion set if a case is too strict.
+- **Adding a fixture.** Update
+  [`fixtures/test-cases.json`](fixtures/test-cases.json) and, if a new SOP
+  section or tool is needed, the relevant runtime path (router in
+  [`../app/worker/agent.py`](../app/worker/agent.py), any new tools in
+  [`../app/tools/tools.py`](../app/tools/tools.py)) before promoting the ID
+  into `MOCK_CASES`.
 - **`EVAL_REPORT.md` is generated.** Don't hand-edit; it is rewritten on every
   run.

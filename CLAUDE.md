@@ -38,7 +38,6 @@ Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for
 | --- | --- |
 | Per-load ID | `thread_id = load-{load_id}` |
 | API → agent | SQS publish only; API never invokes graph |
-| `MODEL_MODE=mock` | Fake LLM (`MockToolCallingModel`) emits fixture tool calls — no OpenRouter |
 | Broker ignore | Pre-agent guard in orchestrator; event still accepted (`202`) |
 | State merge | Graph node applies `AgentDecision` to checkpoint state |
 | API responses | `202` with `{accepted, load_id, workflow_id}` |

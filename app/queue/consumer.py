@@ -43,14 +43,41 @@ async def run_consumer(handler: MessageHandler) -> None:
 
         for raw in messages:
             receipt = raw["ReceiptHandle"]
+            message_id = raw.get("MessageId", "?")
             try:
                 work = WorkMessage.from_json(raw["Body"])
-                await handler(work)
+            except (ValueError, KeyError, TypeError) as exc:
+                # Poison message — invalid JSON or missing required fields.
+                # Retrying won't help, so drop it to keep the worker moving.
+                logger.error(
+                    "Dropping poison SQS message id=%s err=%s body=%r",
+                    message_id,
+                    exc,
+                    raw.get("Body", "")[:500],
+                )
                 await asyncio.to_thread(
                     client.delete_message,
                     QueueUrl=settings.sqs_queue_url,
                     ReceiptHandle=receipt,
                 )
+                continue
+
+            try:
+                await handler(work)
             except Exception:
-                logger.exception("Failed to process SQS message")
-                # Leave message for retry / DLQ
+                # Transient handler failure: leave the message so SQS redelivers
+                # (and eventually moves it to the DLQ via max-receive-count).
+                logger.exception(
+                    "Handler failed; message will be retried "
+                    "load_id=%s kind=%s message_id=%s",
+                    work.load_id,
+                    work.kind,
+                    message_id,
+                )
+                continue
+
+            await asyncio.to_thread(
+                client.delete_message,
+                QueueUrl=settings.sqs_queue_url,
+                ReceiptHandle=receipt,
+            )

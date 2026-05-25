@@ -32,8 +32,9 @@ Use when the workflow starts because the driver arrived, or when the system need
 
 Expected behavior:
 
-1. Follow the customer's first-arrival acknowledgement and delivery-status follow-up workflow.
-2. Do not mention detention unless the driver asked about it.
+1. Send the customer's `first_arrival_message` (from the customer profile) over the inbound channel.
+2. Continue the customer's delivery-status follow-up workflow.
+3. Do not mention detention unless the driver asked about it.
 
 ## Attachment Handling
 
@@ -54,8 +55,8 @@ Use when an attachment is classified as a lumper receipt.
 Expected behavior:
 
 1. Record that a lumper receipt was received.
-2. Follow the customer's lumper receipt review and visibility rules.
-3. If POD is also present, handle POD first and avoid duplicate delivery-state changes.
+2. Follow the customer's `lumper` rules: `mode=forward_email` forwards to the broker email; `mode=review_task` creates a review task. If `forward_email` is set but no email path is possible, fall back to a review task when `review_task_fallback=true`.
+3. If POD is also present, **handle POD first** and avoid duplicate delivery-state changes. Never skip the POD branch when `enforce_pod_handling=true`.
 4. Do not approve reimbursement.
 
 ### Other or Unreadable Attachment
