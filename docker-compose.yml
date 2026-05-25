@@ -21,36 +21,40 @@ services:
     volumes:
       - ./docker/elasticmq.conf:/opt/elasticmq.conf
 
-  # api:
-  #   build: .
-  #   command: ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
-  #   ports:
-  #     - "8000:8000"
-  #   environment:
-  #     DATABASE_URL: postgresql://watchtower:watchtower@postgresql:5432/watchtower
-  #     SQS_QUEUE_URL: http://elasticmq:9324/000000000000/freight-watchtower.fifo
-  #     AWS_REGION: us-east-1
-  #     AWS_ENDPOINT_URL: http://elasticmq:9324
-  #     AWS_ACCESS_KEY_ID: x
-  #     AWS_SECRET_ACCESS_KEY: x
-  #   depends_on:
-  #     postgresql:
-  #       condition: service_healthy
-  #     elasticmq:
-  #       condition: service_started
+  api:
+    build: .
+    command: ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://watchtower:watchtower@postgresql:5432/watchtower
+      SQS_QUEUE_URL: http://elasticmq:9324/000000000000/freight-watchtower.fifo
+      AWS_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://elasticmq:9324
+      AWS_ACCESS_KEY_ID: x
+      AWS_SECRET_ACCESS_KEY: x
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      elasticmq:
+        condition: service_started
 
-  # worker:
-  #   build: .
-  #   command: ["python", "-m", "app.worker"]
-  #   environment:
-  #     DATABASE_URL: postgresql://watchtower:watchtower@postgresql:5432/watchtower
-  #     SQS_QUEUE_URL: http://elasticmq:9324/000000000000/freight-watchtower.fifo
-  #     AWS_REGION: us-east-1
-  #     AWS_ENDPOINT_URL: http://elasticmq:9324
-  #     AWS_ACCESS_KEY_ID: x
-  #     AWS_SECRET_ACCESS_KEY: x
-  #   depends_on:
-  #     postgresql:
-  #       condition: service_healthy
-  #     elasticmq:
-  #       condition: service_started
+  worker:
+    build: .
+    command: ["python", "-m", "app.worker"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://watchtower:watchtower@postgresql:5432/watchtower
+      SQS_QUEUE_URL: http://elasticmq:9324/000000000000/freight-watchtower.fifo
+      AWS_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://elasticmq:9324
+      AWS_ACCESS_KEY_ID: x
+      AWS_SECRET_ACCESS_KEY: x
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      elasticmq:
+        condition: service_started
