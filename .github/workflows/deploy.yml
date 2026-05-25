@@ -24,7 +24,7 @@ jobs:
       # main push always rolls ECS; other branches only when workflow_dispatch deploy_ecs=true
       DEPLOY_ECS: ${{ github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.deploy_ecs) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Check AWS deploy role secret
         run: |
@@ -34,13 +34,13 @@ jobs:
             exit 1
           fi
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@v2.1.5
 
       - name: Build and push
         env:
