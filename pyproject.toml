@@ -35,6 +35,12 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
 
+[tool.coverage.run]
+source = ["."]
+relative_files = true
+branch = true
+omit = ["tests/*", "evals/*", "**/__pycache__/*", ".venv/*"]
+
 [dependency-groups]
 dev = [
     "pytest-cov>=7.1.0",
