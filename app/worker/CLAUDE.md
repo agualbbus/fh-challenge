@@ -130,7 +130,7 @@ flowchart LR
 
 | Field | Meaning |
 | --- | --- |
-| `load_state` | Domain snapshot: `customer_id`, `milestone`, `load_data`, and `active_task`. |
+| `load_state` | Domain snapshot: `customer_id`, `milestone`, `load_data`, and `active_task`. `load_data` is seeded once from the `POST /loads` request body via `seed_node` → `init_load_state`, then mutated only through `merge_load_data` on agent `state_delta`s — there is no external TMS lookup. |
 | `tool_calls` | Append-only list of `ToolCallRecord` dictionaries; this is the challenge eval trajectory contract. |
 | `active_timers` | Timer metadata from timer-related tools and branches. |
 | `session` | Reserved for conversational/session state; currently lightly used. |

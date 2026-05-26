@@ -29,6 +29,17 @@ FreightHero Watchtower is a thin HTTP API over **SQS FIFO** and **LangGraph** wi
 - **Timers:** `create_timer` schedules delayed SQS message (`kind=timer`); max 900s delay on SQS (EventBridge for longer in AWS).
 - **Broker ignore:** Pre-agent guard in orchestrator; event still accepted and logged.
 
+## Load data lifecycle
+
+`load_data` (stops, contacts, references, appointment) is sourced **only** from the `POST /loads` seed request body. There is no external TMS or database lookup at runtime.
+
+1. API validates `LoadSeedRequest` and publishes a `seed` `WorkMessage` carrying `{load_data, milestone}` to SQS (`app/api/routes.py:_seed_from_load`).
+2. `seed_node` calls `init_load_state(load_id, payload)` (`app/worker/merge.py`), writing `load_data` into `LoadGraphState.load_state.load_data` in the Postgres checkpoint.
+3. Subsequent reads — tools, `app/worker/load_data.py` helpers, the SOP prompt's `<load_state>` block — resolve fields from that in-checkpoint dict.
+4. Updates flow through `merge_load_data` (one level deep into `load_data`) applied to agent `state_delta`s; nothing else mutates it.
+
+The seed payload is therefore the single source of truth for the load record; the checkpoint is its durable home.
+
 ## Deterministic tracking branch
 
 Tracking pings (`event_type=tracking`) bypass the LLM entirely. `event_node` calls `app/worker/tracking.handle_tracking_ping`, which maintains a `session["consecutive_geofence_pings"]` counter. When three consecutive fresh pings fall within the customer's `geofence_radius_miles`, it synthesizes `update_load_state(at_delivery)` and `cancel_timers` `ToolCallRecord`s, merges them into the checkpoint, and clears `active_timers` — no LLM call needed.
