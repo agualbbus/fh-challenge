@@ -6,7 +6,7 @@ Context for AI agents working in this repository. **Keep this file up to date** 
 
 Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for ETA checkpoint and confirm delivery workflows, with LangGraph + SQS + PostgreSQL, declarative customer config, mocked recorded tools, and fixture evals.
 
-**Current state:** Five write APIs (`202`), SQS FIFO ingress, LangGraph per-load graph with Postgres checkpoints, LangChain `create_agent`, HTTP eval harness for `3b`/`3c`. LangSmith optional via env vars (`LANGSMITH_TRACING=false` by default; ECS worker also sets legacy `LANGCHAIN_*` aliases). AWS ECS/ALB/RDS/SQS via Terraform; `main` deploys via GitHub Actions OIDC → ECR → ECS force deploy. Phase 4+ fixtures pending.
+**Current state:** Five write APIs (`202`) plus one auth-gated read route (`GET /loads/{load_id}/state`) used by the eval harness, SQS FIFO ingress, LangGraph per-load graph with Postgres checkpoints, LangChain `create_agent`, multi-env HTTP eval harness for `3b`/`3c` configurable via [`evals/config.yaml`](evals/config.yaml). LangSmith optional via env vars (`LANGSMITH_TRACING=false` by default; ECS worker also sets legacy `LANGCHAIN_*` aliases). AWS ECS/ALB/RDS/SQS via Terraform; `main` deploys via GitHub Actions OIDC → ECR → ECS force deploy. Phase 4+ fixtures pending.
 
 ## Canonical documents
 
@@ -49,7 +49,7 @@ Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for
 | SQS queue | `freight-watchtower.fifo` (local: ElasticMQ) |
 | Run API | `uv run uvicorn app.api.main:app --reload --port 8000` |
 | Run worker | `uv run python -m app.worker` |
-| Evals | `uv run python evals/run_evals.py` (needs API + worker + Postgres + SQS) |
+| Evals | `uv run python evals/run_evals.py [--repetitions N] [--fixtures PATH]` — N>1 runs the suite in parallel and emits a single aggregated report (default N=1; needs API + worker + Postgres + SQS) |
 | Tests | `uv run pytest` |
 | Lint | `uv run ruff check .` and `uv run ruff format --check .` |
 | PR CI | `.github/workflows/ci.yml` — ruff + pytest on every pull request |

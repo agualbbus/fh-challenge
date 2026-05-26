@@ -10,30 +10,102 @@ graph in-process and there is no read HTTP API.
 Run it with:
 
 ```bash
+# prompts for an environment (default: local), then runs the suite
 uv run python -m evals.run_evals
+
+# skip the prompt
+uv run python -m evals.run_evals --env local
+
+# override the env's repetitions setting (otherwise read from config.yaml)
+uv run python -m evals.run_evals --env local --repetitions 5
+
+# point at an alternate fixtures JSON
+uv run python -m evals.run_evals --env local --fixtures path/to/other.json
 ```
 
-Requires: API (`:8000`), worker, Postgres, and ElasticMQ/SQS all up, plus an
-`OPENROUTER_API_KEY` so the worker can drive the live OpenRouter agent.
+## Environment configuration
+
+Environments live in [`config.yaml`](config.yaml). Per-env keys:
+
+| Key | Purpose |
+| --- | --- |
+| `api_base_url` | Where the harness POSTs events and GETs checkpoint state. |
+| `api_key` / `api_key_env` | Inline X-API-Key or env var holding it. Use `api_key_env` for non-local envs so secrets stay out of git. |
+| `repetitions` | Default suite repetitions (override with `--repetitions`). |
+| `poll_timeout_seconds` | How long `_wait_for_tools` polls the checkpoint endpoint per case. |
+
+The CLI prompts at start-up; pass `--env <name>` to skip it. `default_env` at the top of the YAML controls which choice is highlighted in the prompt.
+
+Secret values referenced via `api_key_env` are read from **`evals/.env`** (gitignored) at import time. Copy [`evals/.env.example`](.env.example) to `evals/.env` and fill in the keys. Shell-exported vars still win over the file (`override=False`).
+
+The harness no longer connects directly to Postgres — it reads checkpoint state via `GET /loads/{load_id}/state` on the configured API. This is what makes pointing the harness at the prod ALB possible.
+
+CLI flags:
+
+| Flag | Default | Behavior |
+| --- | --- | --- |
+| `--env NAME` | _(prompt)_ | Environment name from `config.yaml`. Skips the interactive prompt. |
+| `--config PATH` | `evals/config.yaml` | Alternate config file. |
+| `--repetitions N` | _(from YAML)_ | Override the env's `repetitions`. When `N > 1`, launches N full-suite runs concurrently via `asyncio.gather` and emits a single aggregated markdown report. Exit code is `0` only if every suite-run fully passes. |
+| `--fixtures PATH` | `evals/fixtures/test-cases.json` | Alternate fixtures JSON. |
+
+Requires (local): API (`:8000`), worker, Postgres, and ElasticMQ/SQS all up,
+plus an `OPENROUTER_API_KEY` so the worker can drive the live OpenRouter agent.
+For a non-local env, only the configured `api_base_url` needs to be reachable;
+the API container handles Postgres + SQS for you.
 Assertions tolerate some live-model variation; pin temperature low if cases
 flake.
+
+### Parallel report layout
+
+```
+# Parallel Eval Report (N=5)
+**Overall:** X/5 suite-runs fully passed — check score …
+
+## Aggregated Summary
+| Case | Run1 | Run2 | Run3 | Run4 | Run5 | Pass rate |
+| ... | PASS | PASS | FAIL | PASS | PASS | 4/5 (80.0%) |
+
+## Individual Runs
+### Run 1 (run_id=`abcd1234`)
+<single-run report body>
+### Run 2 (run_id=`...`)
+...
+```
+
+The aggregated grid surfaces per-case flakiness across N concurrent runs; the
+individual sections retain the full per-case tool-call detail from the
+single-run report.
+
+### Harness unit tests
+
+Pure-function tests live in [`tests/`](tests/) and exercise the path/patch
+helpers, scoring, report builders, the aggregated-table grid, CLI parsing, and
+both report-write paths via a stubbed `execute_suite` (no live stack):
+
+```bash
+uv run pytest evals/tests/
+```
 
 ## Files
 
 | File | Role |
 | --- | --- |
-| [`run_evals.py`](run_evals.py) | Harness entrypoint: seeds loads via `POST /loads`, posts each event, polls the checkpoint, runs assertions, writes a new timestamped report under `reports/`. |
+| [`run_evals.py`](run_evals.py) | Harness entrypoint + CLI (`--env`, `--config`, `--repetitions`, `--fixtures`). Seeds loads via `POST /loads`, posts each event, polls `GET /loads/{load_id}/state`, runs assertions, writes either a single-run or an aggregated parallel report under `reports/`. |
+| [`config.yaml`](config.yaml) | Environment definitions consumed by `env_config.py`. |
+| [`env_config.py`](env_config.py) | Loads `config.yaml`, prompts (or skips via `--env`), produces an `EnvConfig`. |
 | [`assertions.py`](assertions.py) | Pure assertion helpers: `assert_tool_called`, `assert_tool_forbidden`, `assert_state`, and the structured aggregator `evaluate_case`. |
 | [`fixtures/test-cases.json`](fixtures/test-cases.json) | Visible challenge scenarios. Each case has `customer_id`, `initial_state`, optional `load_data_patch`, `events`, and `expected` (`required_tool_calls`, `forbidden_tool_calls`, `expected_state`). |
-| [`reports/`](reports/) | Auto-generated `<UTC-timestamp>_EVAL_REPORT.md` files — one per run, latest sorts to the top. Includes a per-case score and an overall score that ignores extra tool calls. |
+| [`tests/`](tests/) | Pytest unit tests for the harness pure helpers — no live stack needed (`uv run pytest evals/tests/`). |
+| [`reports/`](reports/) | Auto-generated `<UTC-timestamp>_EVAL_REPORT.md` (single-run) or `<UTC-timestamp>_PARALLEL_EVAL_REPORT.md` (when `--repetitions > 1`) files — one per invocation, latest sorts to the top. |
 
 Runtime dependencies:
 
 | Module | Relationship |
 | --- | --- |
 | [`../app/api/routes.py`](../app/api/routes.py) | Write endpoints the harness posts to (`/loads`, `/events/inbound-communication`, `/events/tracking`, `/events/load-update`). |
-| [`../app/worker/graph.py`](../app/worker/graph.py) | `query_load_state` reads checkpoint state for assertions. |
-| [`../app/worker/checkpointer.py`](../app/worker/checkpointer.py) | `init_checkpointer` opens the `AsyncPostgresSaver`. |
+| [`../app/api/routes.py`](../app/api/routes.py) | `GET /loads/{load_id}/state` — checkpoint reader used by the harness. |
+| [`../app/worker/graph.py`](../app/worker/graph.py) | `query_load_state` is invoked **server-side** by the new endpoint. |
 
 ## Allow-Listed Cases
 
@@ -183,3 +255,9 @@ The Results table columns:
   into `MOCK_CASES`.
 - **Reports are generated, never hand-edited.** Every run writes a new file
   under `reports/` named with a UTC timestamp so the latest sorts to the top.
+  `--repetitions > 1` writes one aggregated `*_PARALLEL_EVAL_REPORT.md`
+  instead of N separate single-run reports.
+- **Parallel mode shares the live stack.** All N suite runs hit the same API,
+  worker, Postgres, and SQS queue. Each run gets a unique 8-char `run_id` so
+  `load_id`s never collide, but watch for backpressure (worker queue depth,
+  Postgres connection pool) when pushing `--repetitions` high.

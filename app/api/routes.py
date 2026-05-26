@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.auth import require_api_key
 from app.api.schemas import (
@@ -16,7 +16,7 @@ from app.api.schemas import (
     TrackingEvent,
 )
 from app.config import get_settings
-from app.worker.graph import thread_id_for_load
+from app.worker.graph import query_load_state, thread_id_for_load
 from app.queue.messages import (
     WorkMessage,
     dedup_id_for_event,
@@ -89,6 +89,18 @@ async def health() -> dict:
 )
 async def create_load(body: LoadSeedRequest) -> AcceptedResponse:
     return _publish(body.load_id, "seed", _seed_from_load(body), dedup_id_for_seed(body.load_id))
+
+
+@write_router.get("/loads/{load_id}/state")
+async def read_load_state(load_id: str, request: Request) -> dict:
+    """Checkpoint state for a load — used by the eval harness in lieu of direct Postgres reads."""
+    checkpointer = getattr(request.app.state, "checkpointer", None)
+    if checkpointer is None:
+        raise HTTPException(status_code=503, detail="Checkpointer not initialized")
+    state = await query_load_state(checkpointer, load_id)
+    if not state.get("load_state") and not state.get("tool_calls"):
+        raise HTTPException(status_code=404, detail=f"No checkpoint for load_id={load_id}")
+    return state
 
 
 @write_router.post(

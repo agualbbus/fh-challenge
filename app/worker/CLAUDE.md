@@ -136,7 +136,7 @@ flowchart LR
 | `session` | Reserved for conversational/session state; currently lightly used. |
 | `kind`, `payload` | Per-invoke inputs to the graph. Treat them as the current message, not durable domain state. |
 
-Tests and evals read checkpoints through [`query_load_state`](graph.py), including [`../../evals/run_evals.py`](../../evals/run_evals.py). There is deliberately no HTTP read API because the challenge contract only requires write endpoints.
+Tests read checkpoints directly through [`query_load_state`](graph.py). The eval harness reads them via `GET /loads/{load_id}/state` ([`../api/routes.py`](../api/routes.py)) so it can target the local stack or the deployed ALB uniformly without needing direct Postgres access. The HTTP endpoint is a harness affordance, not part of the challenge contract — the challenge still only exposes write endpoints.
 
 ## Challenge Workarounds And Intentional Gaps
 
@@ -156,7 +156,7 @@ Tests and evals read checkpoints through [`query_load_state`](graph.py), includi
 | Task branch | `kind=task` only sets `active_task`. | Task submission activates the workflow but does not yet trigger a separate agent decision. |
 | SQS timer cap | Timer scheduling uses delayed SQS messages. | SQS delay tops out at 900 seconds; production should use EventBridge for longer delays. |
 | Graph per message | `process_work_message` builds the compiled graph for each message. | This keeps the take-home simple and is acceptable at this scale. |
-| No read API | `query_load_state` is for tests/evals only. | The challenge exposes write endpoints; evals inspect checkpoints directly. |
+| Eval-only read API | `GET /loads/{load_id}/state` wraps `query_load_state`; auth-gated on `write_router`. | The challenge contract only requires write endpoints — the read route exists so the eval harness can hit any env (local or ALB) over HTTP instead of opening a Postgres connection from the dev laptop. |
 
 When adding a new fixture branch, update the relevant routing code, any new tools, and the eval fixtures together (and refresh the few-shot examples in `agent.py` if the new branch needs one). There is no mock LLM module — tests stub `get_chat_model` per-test.
 

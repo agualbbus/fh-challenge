@@ -24,3 +24,4 @@ infra/.secrets-gen
 infra/apply-*.log
 docker/sonarqube
 *.log
+tfplan.bin
