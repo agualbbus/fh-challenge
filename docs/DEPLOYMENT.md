@@ -33,13 +33,13 @@ Or run the full stack: `docker compose up --build` (ensure `.dockerignore` exclu
 
 **Test branch (`github-ecs-setup`)** — push builds and pushes `freight-watchtower:<sha>` only (validates OIDC + ECR; does not update `:latest` or roll ECS).
 
-**Full deploy** — either push to `main`, or run **deploy** manually on `github-ecs-setup` with `deploy_ecs=true` (pushes `:latest` and force-deploys both services).
+**Full deploy** — either push to `main`, or run **deploy** manually on `github-ecs-setup` with `deploy_ecs=true` (pushes `:latest`, registers new task definition revisions with the commit SHA image, and rolls both services).
 
 **Production (`main`)** — every push:
 
 1. Assume the AWS deploy role via OIDC
 2. Build and push `freight-watchtower:<sha>` and `freight-watchtower:latest`
-3. `force-new-deployment` on API and worker
+3. Register new API and worker task definition revisions using `freight-watchtower:<sha>`
 4. Wait until both services are stable
 
 ### Manual deploy

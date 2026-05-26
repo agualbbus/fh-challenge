@@ -54,7 +54,7 @@ Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for
 | Lint | `uv run ruff check .` and `uv run ruff format --check .` |
 | PR CI | `.github/workflows/ci.yml` — ruff + pytest on every pull request |
 | Customer config | `CustomerProfile` from YAML — no scattered `if customer_id` |
-| Cloud deploy | Push to `main` → GitHub Actions OIDC → ECR `:sha`/`:latest` → ECS `force-new-deployment` (not CodePipeline) |
+| Cloud deploy | Push to `main` -> GitHub Actions OIDC -> ECR `:sha`/`:latest` -> new ECS task definition revision (not CodePipeline) |
 
 ## Phase map
 

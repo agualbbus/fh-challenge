@@ -55,13 +55,68 @@ jobs:
             docker push $IMAGE:latest
           fi
 
-      - name: Force new ECS deployments
+      - name: Register new ECS task definition revisions
+        id: task-defs
+        if: env.DEPLOY_ECS == 'true'
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          IMAGE=$REGISTRY/$ECR_REPO:$SHA
+
+          register_revision() {
+            local service=$1
+            local container=$2
+            local output_name=$3
+            local current_task_definition
+
+            current_task_definition=$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$service" \
+              --query 'services[0].taskDefinition' \
+              --output text)
+
+            aws ecs describe-task-definition --task-definition "$current_task_definition" \
+              --query taskDefinition > task-definition.json
+
+            jq --arg image "$IMAGE" --arg container "$container" '
+              .containerDefinitions |= map(
+                if .name == $container then .image = $image else . end
+              )
+              | del(
+                  .taskDefinitionArn,
+                  .revision,
+                  .status,
+                  .requiresAttributes,
+                  .compatibilities,
+                  .registeredAt,
+                  .registeredBy
+                )
+            ' task-definition.json > new-task-definition.json
+
+            local task_definition_arn
+            task_definition_arn=$(aws ecs register-task-definition \
+              --cli-input-json file://new-task-definition.json \
+              --query 'taskDefinition.taskDefinitionArn' \
+              --output text)
+
+            echo "$output_name=$task_definition_arn" >> "$GITHUB_OUTPUT"
+          }
+
+          register_revision freight-watchtower-api api api_task_definition_arn
+          register_revision freight-watchtower-worker worker worker_task_definition_arn
+
+      - name: Update ECS services
         if: env.DEPLOY_ECS == 'true'
         run: |
           aws ecs update-service --cluster $ECS_CLUSTER \
-            --service freight-watchtower-api --force-new-deployment >/dev/null
+            --service freight-watchtower-api \
+            --task-definition "${{ steps.task-defs.outputs.api_task_definition_arn }}" >/dev/null
           aws ecs update-service --cluster $ECS_CLUSTER \
-            --service freight-watchtower-worker --force-new-deployment >/dev/null
+            --service freight-watchtower-worker \
+            --task-definition "${{ steps.task-defs.outputs.worker_task_definition_arn }}" >/dev/null
 
       - name: Wait for services to stabilize
         if: env.DEPLOY_ECS == 'true'
