@@ -1,7 +1,8 @@
-"""Fixture-driven eval harness — HTTP ingress + LangGraph checkpoint state."""
+"""Fixture-driven eval harness — HTTP ingress + HTTP checkpoint read."""
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import copy
 import json
@@ -17,7 +18,13 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from evals.assertions import CaseResult, evaluate_case
+from evals.assertions import CaseResult, evaluate_case  # noqa: E402
+from evals.env_config import (  # noqa: E402
+    CONFIG_PATH,
+    EnvConfig,
+    load_env_config,
+    select_env,
+)
 
 FIXTURES_PATH = Path(__file__).resolve().parent / "fixtures" / "test-cases.json"
 REPORTS_DIR = Path(__file__).resolve().parent / "reports"
@@ -89,24 +96,26 @@ def _build_load_seed(
     }
 
 
-async def _query_load_state(load_id: str) -> dict[str, Any]:
-    from app.config import get_settings
-    from app.worker.checkpointer import init_checkpointer
-    from app.worker.graph import query_load_state
-
-    settings = get_settings()
-    cp = await init_checkpointer(settings.database_url)
-    return await query_load_state(cp, load_id)
+async def _query_load_state(client: httpx.AsyncClient, load_id: str) -> dict[str, Any]:
+    """Read checkpoint state through the API. 404 → empty placeholder."""
+    resp = await client.get(f"/loads/{load_id}/state")
+    if resp.status_code == 404:
+        return {"tool_calls": [], "milestone": None, "load_state": {}}
+    resp.raise_for_status()
+    return resp.json()
 
 
 async def _wait_for_tools(
-    load_id: str, min_count: int, timeout_seconds: float = 30.0
+    client: httpx.AsyncClient,
+    load_id: str,
+    min_count: int,
+    timeout_seconds: float,
 ) -> dict[str, Any]:
     last: dict[str, Any] = {}
     try:
         async with asyncio.timeout(timeout_seconds):
             while True:
-                last = await _query_load_state(load_id)
+                last = await _query_load_state(client, load_id)
                 milestone = last.get("milestone") or last.get("load_state", {}).get("milestone")
                 if milestone and len(last.get("tool_calls", [])) >= min_count:
                     return last
@@ -120,6 +129,8 @@ async def run_case(
     case: dict[str, Any],
     base_load: dict[str, Any],
     run_id: str,
+    *,
+    poll_timeout_seconds: float,
 ) -> tuple[bool, list[str], dict[str, Any], CaseResult]:
     seed = _build_load_seed(case, base_load, run_id)
     load_id = seed["load_id"]
@@ -156,33 +167,48 @@ async def run_case(
 
     expected = case.get("expected", {})
     min_tools = len(expected.get("required_tool_calls", []))
-    state = await _wait_for_tools(load_id, min_tools)
+    state = await _wait_for_tools(client, load_id, min_tools, poll_timeout_seconds)
     case_result = evaluate_case(state, expected)
     errors.extend(case_result.errors)
     return len(errors) == 0, errors, state, case_result
 
 
-async def run_all(api_base: str, case_filter: set[str] | None = None) -> int:
-    data = json.loads(FIXTURES_PATH.read_text(encoding="utf-8"))
+def _client_headers(env: EnvConfig) -> dict[str, str]:
+    return {"X-API-Key": env.api_key} if env.api_key else {}
+
+
+async def execute_suite(
+    env: EnvConfig,
+    fixtures_path: Path = FIXTURES_PATH,
+    case_filter: set[str] | None = None,
+    run_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Run the fixture suite once and return per-case result dicts."""
+    data = json.loads(fixtures_path.read_text(encoding="utf-8"))
     base_load = data["base_load"]
     cases = data["cases"]
     if case_filter:
         cases = [c for c in cases if c["id"] in case_filter]
 
-    # Per-run suffix isolates this harness invocation from prior runs:
-    # avoids LangGraph checkpoint accumulation and SQS FIFO dedup hits.
-    run_id = uuid.uuid4().hex[:8]
-    print(f"Eval run_id: {run_id}", file=sys.stderr)
+    if run_id is None:
+        run_id = uuid.uuid4().hex[:8]
 
     results: list[dict[str, Any]] = []
-    async with httpx.AsyncClient(base_url=api_base, timeout=30.0) as client:
+    async with httpx.AsyncClient(
+        base_url=env.api_base_url, timeout=30.0, headers=_client_headers(env)
+    ) as client:
         health = await client.get("/health")
         if health.status_code != 200:
-            print(f"API health check failed: {health.status_code}", file=sys.stderr)
-            return 1
+            raise RuntimeError(f"API health check failed: {health.status_code}")
 
         for case in cases:
-            ok, errors, state, case_result = await run_case(client, case, base_load, run_id)
+            ok, errors, state, case_result = await run_case(
+                client,
+                case,
+                base_load,
+                run_id,
+                poll_timeout_seconds=env.poll_timeout_seconds,
+            )
             load_id = f"eval-{case['id']}-{run_id}"
             results.append(
                 {
@@ -193,17 +219,93 @@ async def run_all(api_base: str, case_filter: set[str] | None = None) -> int:
                     "result": case_result,
                     "load_id": load_id,
                     "thread_id": f"load-{load_id}",
+                    "run_id": run_id,
                 }
             )
-            status = "PASS" if ok else "FAIL"
-            print(f"{status} {case['id']}")
-            for err in errors:
-                print(f"  - {err}")
+    return results
 
-    report_path = _write_report(results)
+
+async def _run_single(
+    env: EnvConfig,
+    case_filter: set[str] | None,
+    fixtures_path: Path,
+) -> int:
+    run_id = uuid.uuid4().hex[:8]
+    print(f"Eval run_id: {run_id}", file=sys.stderr)
+
+    try:
+        results = await execute_suite(env, fixtures_path, case_filter, run_id=run_id)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    for r in results:
+        status = "PASS" if r["ok"] else "FAIL"
+        print(f"{status} {r['case']['id']}")
+        for err in r["errors"]:
+            print(f"  - {err}")
+
+    report_path = _write_report(results, env=env)
     print(f"Eval report written: {report_path}", file=sys.stderr)
     failed = sum(1 for r in results if not r["ok"])
     return 1 if failed else 0
+
+
+async def _run_parallel(
+    env: EnvConfig,
+    case_filter: set[str] | None,
+    fixtures_path: Path,
+    repetitions: int,
+) -> int:
+    run_ids = [uuid.uuid4().hex[:8] for _ in range(repetitions)]
+    print(f"Launching {repetitions} parallel suite runs: {run_ids}", file=sys.stderr)
+
+    tasks = [execute_suite(env, fixtures_path, case_filter, run_id=rid) for rid in run_ids]
+    settled = await asyncio.gather(*tasks, return_exceptions=True)
+
+    suite_runs: list[list[dict[str, Any]]] = []
+    failed_to_start = 0
+    for i, result in enumerate(settled):
+        if isinstance(result, Exception):
+            print(f"Run {i + 1} ({run_ids[i]}) errored: {result}", file=sys.stderr)
+            failed_to_start += 1
+            continue
+        suite_runs.append(result)
+        passed = sum(1 for r in result if r["ok"])
+        print(
+            f"Run {i + 1} ({run_ids[i]}): {passed}/{len(result)} cases passed",
+            file=sys.stderr,
+        )
+
+    if not suite_runs:
+        return 1
+
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
+    report_path = REPORTS_DIR / f"{timestamp}_PARALLEL_EVAL_REPORT.md"
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    lines = _build_aggregated_report(
+        suite_runs, fixtures_path=fixtures_path, timestamp=timestamp, env=env
+    )
+    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"Aggregated eval report written: {report_path}", file=sys.stderr)
+
+    all_passed = failed_to_start == 0 and all(all(r["ok"] for r in run) for run in suite_runs)
+    return 0 if all_passed else 1
+
+
+async def run_all(
+    env: EnvConfig,
+    case_filter: set[str] | None = None,
+    fixtures_path: Path = FIXTURES_PATH,
+    repetitions: int | None = None,
+) -> int:
+    reps = repetitions if repetitions is not None else env.repetitions
+    if reps < 1:
+        print(f"repetitions must be >= 1 (got {reps})", file=sys.stderr)
+        return 2
+    if reps == 1:
+        return await _run_single(env, case_filter, fixtures_path)
+    return await _run_parallel(env, case_filter, fixtures_path, reps)
 
 
 def _score(case_result: CaseResult) -> tuple[int, int]:
@@ -239,7 +341,13 @@ def _fmt_actual_tool(tc: dict[str, Any]) -> str:
     return f"`{tool}` — {rendered}"
 
 
-def _write_report(results: list[dict[str, Any]]) -> Path:
+def build_report_body(
+    results: list[dict[str, Any]],
+    *,
+    include_header: bool = True,
+    env: EnvConfig | None = None,
+) -> list[str]:
+    """Return the markdown lines for a single suite-run report."""
     total = len(results)
     passed = sum(1 for r in results if r["ok"])
     failed = total - passed
@@ -251,21 +359,36 @@ def _write_report(results: list[dict[str, Any]]) -> Path:
         overall_passed += cp
         overall_total += ct
 
-    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
-    report_path = REPORTS_DIR / f"{timestamp}_EVAL_REPORT.md"
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    if include_header:
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
+        lines += [
+            "# Eval Report",
+            "",
+            f"_Generated: {timestamp}_",
+            "",
+        ]
+        if env is not None:
+            lines += [f"**Environment:** `{env.name}` ({env.api_base_url})", ""]
+        lines += [
+            (
+                f"**Summary:** {passed}/{total} passed, {failed} failed — "
+                f"overall score {_pct(overall_passed, overall_total)} "
+                f"({overall_passed}/{overall_total} checks)"
+            ),
+            "",
+        ]
+    else:
+        lines += [
+            (
+                f"**Summary:** {passed}/{total} passed, {failed} failed — "
+                f"overall score {_pct(overall_passed, overall_total)} "
+                f"({overall_passed}/{overall_total} checks)"
+            ),
+            "",
+        ]
 
-    lines: list[str] = [
-        "# Eval Report",
-        "",
-        f"_Generated: {timestamp}_",
-        "",
-        (
-            f"**Summary:** {passed}/{total} passed, {failed} failed — "
-            f"overall score {_pct(overall_passed, overall_total)} "
-            f"({overall_passed}/{overall_total} checks)"
-        ),
-        "",
+    lines += [
         "## Scoring",
         "",
         "Each case contributes `len(required) + len(forbidden) + (1 if expected_state else 0)` checks.",
@@ -362,16 +485,157 @@ def _write_report(results: list[dict[str, Any]]) -> Path:
                 lines.append(f"- {err}")
             lines.append("")
 
+    return lines
+
+
+def _aggregate_table(suite_runs: list[list[dict[str, Any]]]) -> list[str]:
+    """Per-case PASS/FAIL grid across N parallel suite runs."""
+    num_runs = len(suite_runs)
+    case_ids: list[str] = []
+    seen: set[str] = set()
+    for run in suite_runs:
+        for r in run:
+            cid = r["case"]["id"]
+            if cid not in seen:
+                seen.add(cid)
+                case_ids.append(cid)
+
+    header = "| Case |" + "".join(f" Run{i + 1} |" for i in range(num_runs)) + " Pass rate |"
+    sep = "| --- |" + " --- |" * num_runs + " --- |"
+    lines = [header, sep]
+
+    for cid in case_ids:
+        cells: list[str] = []
+        passes = 0
+        seen_in_runs = 0
+        for run in suite_runs:
+            match = next((r for r in run if r["case"]["id"] == cid), None)
+            if match is None:
+                cells.append("—")
+            else:
+                seen_in_runs += 1
+                if match["ok"]:
+                    passes += 1
+                    cells.append("PASS")
+                else:
+                    cells.append("FAIL")
+        rate = _pct(passes, seen_in_runs)
+        lines.append(
+            f"| {cid} |"
+            + "".join(f" {c} |" for c in cells)
+            + f" {passes}/{seen_in_runs} ({rate}) |"
+        )
+    return lines
+
+
+def _build_aggregated_report(
+    suite_runs: list[list[dict[str, Any]]],
+    *,
+    fixtures_path: Path,
+    timestamp: str,
+    env: EnvConfig | None = None,
+) -> list[str]:
+    num_runs = len(suite_runs)
+    fully_passed = sum(1 for run in suite_runs if all(r["ok"] for r in run))
+
+    overall_passed = 0
+    overall_total = 0
+    for run in suite_runs:
+        for r in run:
+            cp, ct = _score(r["result"])
+            overall_passed += cp
+            overall_total += ct
+
+    lines: list[str] = [
+        f"# Parallel Eval Report (N={num_runs})",
+        "",
+        f"_Generated: {timestamp}_",
+        "",
+    ]
+    if env is not None:
+        lines += [f"**Environment:** `{env.name}` ({env.api_base_url})", ""]
+    lines += [
+        f"**Fixtures:** `{fixtures_path}`",
+        "",
+        (
+            f"**Overall:** {fully_passed}/{num_runs} suite-runs fully passed — "
+            f"check score {_pct(overall_passed, overall_total)} "
+            f"({overall_passed}/{overall_total})"
+        ),
+        "",
+        "## Aggregated Summary",
+        "",
+    ]
+    lines += _aggregate_table(suite_runs)
+    lines += ["", "## Individual Runs", ""]
+    for i, run in enumerate(suite_runs, start=1):
+        run_id = run[0]["run_id"] if run else "—"
+        lines += [f"### Run {i} (run_id=`{run_id}`)", ""]
+        lines += build_report_body(run, include_header=False)
+        lines += [""]
+    return lines
+
+
+def _write_report(results: list[dict[str, Any]], *, env: EnvConfig | None = None) -> Path:
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
+    report_path = REPORTS_DIR / f"{timestamp}_EVAL_REPORT.md"
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    lines = build_report_body(results, include_header=True, env=env)
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return report_path
 
 
+def _parse_cli(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run the fixture eval suite. The harness prompts for an environment "
+            "(see evals/config.yaml); pass --env <name> to skip the prompt. "
+            "With repetitions > 1, runs N full suites in parallel and emits a "
+            "single aggregated report."
+        ),
+    )
+    parser.add_argument(
+        "--env",
+        type=str,
+        default=None,
+        help="Environment name from evals/config.yaml. If omitted, prompts.",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=CONFIG_PATH,
+        help=f"Path to eval config YAML (default: {CONFIG_PATH}).",
+    )
+    parser.add_argument(
+        "--repetitions",
+        type=int,
+        default=None,
+        help="Override repetitions for the selected environment.",
+    )
+    parser.add_argument(
+        "--fixtures",
+        type=Path,
+        default=FIXTURES_PATH,
+        help="Path to fixtures JSON (default: evals/fixtures/test-cases.json).",
+    )
+    return parser.parse_args(argv)
+
+
 def main() -> int:
     from app.asyncio_compat import run as run_async
-    from app.config import get_settings
 
-    settings = get_settings()
-    return run_async(run_all(settings.api_base_url, MOCK_CASES))
+    args = _parse_cli()
+    config = load_env_config(args.config)
+    env = select_env(config, args.env)
+    print(f"Eval environment: {env.name} ({env.api_base_url})", file=sys.stderr)
+    return run_async(
+        run_all(
+            env,
+            MOCK_CASES,
+            fixtures_path=args.fixtures,
+            repetitions=args.repetitions,
+        )
+    )
 
 
 if __name__ == "__main__":

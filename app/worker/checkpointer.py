@@ -2,25 +2,33 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
 
 _checkpointer: AsyncPostgresSaver | None = None
-_context: AsyncIterator[AsyncPostgresSaver] | None = None
+_pool: AsyncConnectionPool | None = None
 
 
 async def init_checkpointer(database_url: str) -> AsyncPostgresSaver:
-    """Open checkpointer pool and run migrations once per process."""
-    global _checkpointer, _context
+    """Open a pooled checkpointer and run migrations once per process.
+
+    Uses ``AsyncConnectionPool`` instead of a single connection so concurrent
+    graph invocations (parallel SQS handlers, parallel eval reads) don't race
+    on one psycopg connection.
+    """
+    global _checkpointer, _pool
     if _checkpointer is not None:
         return _checkpointer
 
-    _context = AsyncPostgresSaver.from_conn_string(database_url)
-    _checkpointer = await _context.__aenter__()
+    _pool = AsyncConnectionPool(
+        conninfo=database_url,
+        max_size=20,
+        kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
+        open=False,
+    )
+    await _pool.open()
+    _checkpointer = AsyncPostgresSaver(conn=_pool)
     await _checkpointer.setup()
     return _checkpointer
 
@@ -32,8 +40,8 @@ def get_checkpointer() -> AsyncPostgresSaver:
 
 
 async def close_checkpointer() -> None:
-    global _checkpointer, _context
-    if _context is not None:
-        await _context.__aexit__(None, None, None)
+    global _checkpointer, _pool
+    if _pool is not None:
+        await _pool.close()
     _checkpointer = None
-    _context = None
+    _pool = None

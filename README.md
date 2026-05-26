@@ -84,6 +84,26 @@ See [infra/README.md](infra/README.md) for RDS, SQS, and Secrets Manager.
 | `make test` | `pytest` |
 | `make eval` | Fixture harness (`3b`, `3c`) |
 
+### Evals
+
+Single run (default):
+
+```bash
+uv run python -m evals.run_evals
+```
+
+Run the full suite **N times in parallel** with a single aggregated report:
+
+```bash
+uv run python -m evals.run_evals --repetitions 5
+uv run python -m evals.run_evals --repetitions 5 --fixtures evals/fixtures/test-cases.json
+```
+
+- `--repetitions N` (default `1`) — when `N > 1`, runs N full suites concurrently and writes a single `evals/reports/<ts>_PARALLEL_EVAL_REPORT.md` with an aggregated per-case PASS/FAIL grid on top and each individual run's report body below. `N = 1` keeps the existing `<ts>_EVAL_REPORT.md` output.
+- `--fixtures PATH` (default `evals/fixtures/test-cases.json`) — point at an alternate fixtures JSON file.
+
+Unit tests for the harness live in [`evals/tests/`](evals/tests/) and run via `uv run pytest evals/tests/` — no live stack needed. See [`evals/README.md`](evals/README.md) for the full harness reference.
+
 ## Layout
 
 ```

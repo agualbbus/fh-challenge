@@ -1,0 +1,24 @@
+## Eval harness environments.
+#
+# The harness prompts which environment to use at start-up; pass
+# `--env <name>` on the CLI to skip the prompt. Per-env values override the
+# YAML defaults via CLI flags (e.g. `--repetitions`).
+#
+# `api_key_env` names an env var to read the X-API-Key from. Use `api_key:`
+# for an inline value (NEVER for prod — keep secrets out of git).
+
+default_env: local
+
+environments:
+  local:
+    api_base_url: http://localhost:8000
+    api_key: null
+    repetitions: 1
+    poll_timeout_seconds: 90
+
+  prod:
+    # Replace with `terraform -chdir=infra output -raw alb_dns_name`.
+    api_base_url: http://freight-watchtower-api-313864937.us-east-1.elb.amazonaws.com
+    api_key_env: WATCHTOWER_API_KEY
+    repetitions: 1
+    poll_timeout_seconds: 180
