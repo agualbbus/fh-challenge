@@ -63,7 +63,7 @@ Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for
 | **1** Repos, uv, Docker, Terraform skeleton | Done |
 | **2** Agent harness (tools, customers, evals, LangSmith stub) | Done |
 | **3** `3b` / `3c` via `create_agent` + write APIs | Done |
-| **4+** Remaining visible fixtures | Planned |
+| **4+** Remaining visible fixtures | Done |
 | **Submission** | Live evidence, `AI_USAGE.md` | Planned |
 
 ## Gotchas
@@ -72,6 +72,8 @@ Take-home implementation of **FreightHero AI Watchtower**: SOP-driven agents for
 - `.dockerignore` excludes `.venv` — required for reasonable image builds.
 - Eval harness uses `graph.aget_state`; no read HTTP API.
 - SQS max delay 900s — use EventBridge for longer ETA follow-ups in production.
+- Tracking pings are handled deterministically in `app/worker/tracking.py` (no LLM) — three consecutive in-geofence pings trigger `at_delivery` transition via synthetic `ToolCallRecord`s appended to the checkpoint.
+- Attachment-driven SOP switch: when an inbound_communication with attachments arrives on the `delivery_eta_checkpoint` SOP, `event_node` promotes `active_task` to `confirm_delivery` before invoking the agent so `check_attachment` is available.
 
 ## Keep CLAUDE.md files in sync
 

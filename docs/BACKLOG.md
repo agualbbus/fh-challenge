@@ -32,20 +32,20 @@ Kickoff backlog derived from [implementation-spec.md](research/implementation-sp
 - [x] Eval: `3b_load_question_found`
 - [x] Graph: missing info + Customer B escalation
 - [x] Eval: `3c_load_question_missing`
-- [ ] Re-run HTTP evals against full docker compose stack
+- [x] Re-run HTTP evals against full docker compose stack (all 8 visible cases in `MOCK_CASES`)
 
 ## Phase 4+ — Visible fixtures (priority order)
 
-- [ ] `3k_broker_email_ignore`
-- [ ] `3d_truck_broken`
-- [ ] `3f_driver_provides_eta` (+ timer via SQS delay injection in tests)
-- [ ] `3h_fresh_tracking_three_pings_in_geofence`
-- [ ] `3i_not_tracking_driver_says_arrived`
-- [ ] `3j_not_tracking_driver_sends_pod`
+- [x] `3k_broker_email_ignore`
+- [x] `3d_truck_broken`
+- [x] `3f_driver_provides_eta` (ETA few-shot + SOP tightening + timer nudge)
+- [x] `3h_fresh_tracking_three_pings_in_geofence` (deterministic `tracking.py` handler, no LLM)
+- [x] `3i_not_tracking_driver_says_arrived` (arrival few-shot + SOP tightening)
+- [x] `3j_not_tracking_driver_sends_pod` (attachment-driven SOP switch → confirm_delivery; POD few-shot)
 - [x] Confirm delivery selectable by milestone (`seed_node` → `task_for_milestone`)
 - [x] Customer C lumper config: `forward_email` + `review_task_fallback` + `enforce_pod_handling`
 - [x] Per-customer `first_arrival_message` templates in YAML
-- [ ] Confirm-delivery fixtures (visible cases all start `on_route_to_delivery`; SOP wired but unexercised by visible tests)
+- [x] Confirm-delivery fixtures (3i/3j exercise the confirm-delivery SOP path end-to-end)
 
 ## Submission
 

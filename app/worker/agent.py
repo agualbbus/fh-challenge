@@ -154,12 +154,14 @@ def _examples_block() -> str:
         "  SUMMARY: Replied to driver with delivery address by SMS.\n"
         "  RATIONALE: Driver asked for delivery address; value was in load_data.\n"
         "\n"
-        'Example 2 — Driver provides ETA "ETA 3pm" (SMS):\n'
-        '- Tool call: record_eta(eta="15:00", timezone="America/Chicago")\n'
-        '- Tool call: send_sms(recipient="driver", message="Got it — ETA 3pm noted.")\n'
+        'Example 2 — Driver provides ETA "ETA 2:30pm central" (SMS, customer_c, eta_followup_minutes=45):\n'
+        '- Tool call: validate_eta(eta_utc="2026-05-11T19:30:00Z", target_location="delivery")\n'
+        '- Tool call: update_eta(target_location="delivery", eta_utc="2026-05-11T19:30:00Z")\n'
+        '- Tool call: send_sms(recipient="driver", message="Got it — ETA updated.")\n'
+        '- Tool call: create_timer(timer_type="eta_followup", fire_at_utc="2026-05-11T18:15:00Z")\n'
         "- Final message after tools:\n"
-        "  SUMMARY: Recorded driver ETA of 15:00 local and acknowledged on SMS.\n"
-        "  RATIONALE: Driver provided usable ETA; recorded and acknowledged per SOP.\n"
+        "  SUMMARY: Recorded ETA 2:30pm central, acknowledged with 'updated', scheduled eta_followup timer.\n"
+        "  RATIONALE: Driver provided usable ETA; SOP requires update_eta + ack with 'updated' + followup timer.\n"
         "\n"
         "Example 3 — Driver reports breakdown (SMS):\n"
         '- Tool call: create_issue(title="Operational issue reported", description="truck broke down", issue_type="equipment_failure")\n'
@@ -167,6 +169,22 @@ def _examples_block() -> str:
         "- Final message after tools:\n"
         "  SUMMARY: Logged breakdown as operational issue and acknowledged driver on SMS.\n"
         "  RATIONALE: Driver reported equipment failure; SOP requires logging + brief ack.\n"
+        "\n"
+        'Example 4 — Driver says "Arrived at receiver" (SMS, not tracking):\n'
+        '- Tool call: update_load_state(target_state="at_delivery")\n'
+        "- Tool call: cancel_timers()\n"
+        '- Tool call: send_sms(recipient="driver", message="Confirm unloading status. Send POD when available.")\n'
+        "- Final message after tools:\n"
+        "  SUMMARY: Marked load at_delivery, cancelled timers, asked driver for POD via SMS.\n"
+        "  RATIONALE: Driver confirmed arrival; SOP requires state transition + timer cancel + first_arrival_message.\n"
+        "\n"
+        "Example 5 — Driver sends POD attachment (SMS, attachment present, confirm_delivery SOP):\n"
+        '- Tool call: check_attachment(attachment_id="att-pod-xyz")\n'
+        '- Tool call: update_load_state(target_state="pod_collected")\n'
+        '- Tool call: send_sms(recipient="driver", message="Thank you — POD received.")\n'
+        "- Final message after tools:\n"
+        "  SUMMARY: Verified POD attachment, updated milestone to pod_collected, thanked driver.\n"
+        "  RATIONALE: Driver sent signed POD; SOP requires check_attachment + state update + thank-you.\n"
         "</examples>"
     )
 

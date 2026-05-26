@@ -18,13 +18,14 @@ Entrypoint flow: [`__main__.py`](__main__.py) calls [`main.py`](main.py), which 
 | [`checkpointer.py`](checkpointer.py) | Manage the `AsyncPostgresSaver` lifecycle and run checkpoint migrations once per process. |
 | [`state.py`](state.py) | Define `LoadGraphState`; `tool_calls` uses an `operator.add` reducer for append-style accumulation. |
 | [`graph.py`](graph.py) | Compile the `StateGraph`, wire conditional edges from START, and expose the public surface (`process_work_message`, `query_load_state`, `route_event` re-export, addressing helpers). |
-| [`nodes.py`](nodes.py) | One node per work `kind` (`seed`, `task`, `timer`, `event`) plus `select_branch` used by the conditional edge from START. The `event` node wraps the agent invocation in `@task`. |
+| [`nodes.py`](nodes.py) | One node per work `kind` (`seed`, `task`, `timer`, `event`) plus `select_branch` used by the conditional edge from START. The `event` node wraps the agent invocation in `@task`, with two pre-agent guards: a deterministic tracking branch and an attachment-driven SOP switch. |
 | [`agent.py`](agent.py) | `build_agent` (`create_agent` factory), `sop_prompt` dynamic prompt, `WatchtowerAgentState`, `run_agent_for_event`, and the `route_event` broker guard. |
 | [`tool_extraction.py`](tool_extraction.py) | Pure `extract_tool_records` — pairs `AIMessage.tool_calls` with their `ToolMessage` results into `ToolCallRecord`s. |
 | [`merge.py`](merge.py) | Pure helpers: `init_load_state` and `merge_load_data` (top-level merge, one level deep into `load_data`). |
 | [`llm.py`](llm.py) | Build the `ChatOpenRouter` chat model for `create_agent`. Tests monkeypatch `get_chat_model`. |
 | [`sops.py`](sops.py) | Load branch-scoped SOP markdown sections from [`../sops/`](../sops/). |
 | [`load_data.py`](load_data.py) | Detect requested load fields and format load data for tools. |
+| [`tracking.py`](tracking.py) | Deterministic tracking-ping handler (`handle_tracking_ping`). Counts consecutive in-geofence pings in `session["consecutive_geofence_pings"]`; on the third, synthesizes `update_load_state`+`cancel_timers` `ToolCallRecord`s and transitions milestone to `at_delivery`. No LLM involved. |
 
 Related modules this worker depends on:
 
@@ -77,7 +78,12 @@ flowchart TD
     START -->|select_branch on kind| taskN["task_node"]
     START -->|select_branch on kind| timer["timer_node"]
     START -->|select_branch on kind| event["event_node"]
-    event --> invoke["@task _invoke_agent"]
+    event -->|"event_type=tracking"| trackingHandler["handle_tracking_ping (deterministic)"]
+    trackingHandler -->|"< 3 pings"| trackingNoop["accumulate session counter"]
+    trackingHandler -->|"3rd consecutive in-geofence ping"| arrived["at_delivery + cancel_timers"]
+    event -->|"inbound_comm + attachments + ETA SOP"| sopSwitch["switch active_task → confirm_delivery"]
+    sopSwitch --> invoke["@task _invoke_agent"]
+    event -->|"other inbound_comm"| invoke
     invoke --> route["route_event"]
     route -->|"broker"| brokerNoop["noop broker_messages"]
     route -->|"inbound_comm"| agent["run_agent_for_event"]
@@ -88,7 +94,12 @@ flowchart TD
     event --> END
 ```
 
-The conditional edge from `START` (`select_branch`) dispatches on `state["kind"]`: `seed` initializes `load_state` and sets `active_task` from the seed's `milestone` via `sops.task_for_milestone`, `task` (from `POST /submit-task`) overrides `active_task` explicitly, `timer` is a noop placeholder for Phase 4+, and `event` invokes the agent through the durable `@task`-wrapped `_invoke_agent`. Inside `route_event`, broker messages short-circuit before the LLM and supported inbound communications enter `run_agent_for_event`.
+The conditional edge from `START` (`select_branch`) dispatches on `state["kind"]`. Inside `event_node` there are two pre-agent guards before `_invoke_agent` is called:
+
+1. **Tracking branch** — if `event_type == "tracking"`, `handle_tracking_ping` (in `tracking.py`) counts consecutive in-geofence pings in `session["consecutive_geofence_pings"]`. On the third ping it synthesizes `update_load_state`+`cancel_timers` records and merges the `at_delivery` milestone without touching the LLM.
+2. **Attachment SOP switch** — if an `inbound_communication` carries attachments while `active_task == "delivery_eta_checkpoint"`, `event_node` promotes `active_task` to `confirm_delivery` (via `merge_load_data`) before calling `_invoke_agent`, so `check_attachment` is in the agent's tool surface.
+
+Inside `route_event`, broker messages short-circuit before the LLM and supported inbound communications enter `run_agent_for_event`.
 
 ## Agent Stack
 
@@ -119,7 +130,7 @@ flowchart LR
 
 | Field | Meaning |
 | --- | --- |
-| `load_state` | Domain snapshot: `customer_id`, `milestone`, `load_data`, and `active_task`. |
+| `load_state` | Domain snapshot: `customer_id`, `milestone`, `load_data`, and `active_task`. `load_data` is seeded once from the `POST /loads` request body via `seed_node` → `init_load_state`, then mutated only through `merge_load_data` on agent `state_delta`s — there is no external TMS lookup. |
 | `tool_calls` | Append-only list of `ToolCallRecord` dictionaries; this is the challenge eval trajectory contract. |
 | `active_timers` | Timer metadata from timer-related tools and branches. |
 | `session` | Reserved for conversational/session state; currently lightly used. |
@@ -139,8 +150,9 @@ Tests and evals read checkpoints through [`query_load_state`](graph.py), includi
 | SOP prompt | The prompt is built section-by-section (`_role_block`, `_routing_rules_block`, `_context_block`, `_format_customer_profile`, `_sop_block`, `_load_state_block`, `_event_block`, `_examples_block`, `_output_contract_block` in `agent.py`) using XML-style tags around each section, with the customer profile rendered as a bullet list and the full active-task SOP markdown inside `<sop>...</sop>`. The agent must first call tools and then end with one plain-text message of the form `SUMMARY: ...` / `RATIONALE: ...`; `parse_final_answer` extracts both via regex from the last `AIMessage`. We deliberately do NOT bind `response_format=` to `create_agent` because that pulls models straight to the structured output and skips the tool loop. `active_task` must be set on `load_state` (no silent default) or prompt construction raises. | The agent picks the SOP section; Python no longer pre-selects one. |
 | SOP selection | `task_for_milestone(milestone)` in `sops.py` maps `on_route_to_delivery → delivery_eta_checkpoint` and `at_delivery/delivered/pod_collected → confirm_delivery`. Applied in `seed_node`; overridable by `/submit-task`. | Fixtures choose the SOP via `initial_state` without needing a separate task submission. |
 | SOP-scoped tools | `tools_for_sop(active_task)` in `sops.py` returns the subset of `app/tools/tools.py` that the active SOP authorizes (`_SOP_TOOL_NAMES`). `build_agent(active_task)` passes that subset to `create_agent` instead of `ALL_TOOLS`. ETA SOP drops `check_attachment`/`forward_email`; confirm-delivery SOP drops `update_eta`/`validate_eta`/`get_appointment_time`. `send_email` is in neither set. | Removes a class of wrong-tool failures by aligning the bound tool surface with the SOP that was already selected deterministically. |
-| Narrow event routing | Unsupported event types return `noop` with `sop=no_action`. | Phase 4+ fixtures are still pending. |
-| Timer branch | `kind=timer` returns `noop` (no agent invocation). | ETA follow-up agent behavior has not been implemented yet. |
+| Narrow event routing | Unsupported event types return `noop` with `sop=no_action`. Tracking pings are handled by the deterministic branch in `event_node` (not the LLM). | Keeps the agent surface focused; deterministic arrival detection is more reliable than asking the LLM to count pings. |
+| Attachment SOP switch | When `event_type=inbound_communication` carries attachments while `active_task==delivery_eta_checkpoint`, `event_node` calls `merge_load_data(load_state, {"active_task": "confirm_delivery"})` before invoking the agent. | A POD arriving before an explicit arrival message implies the load is at delivery; switching SOPs gives the agent access to `check_attachment`. |
+| Timer branch | `kind=timer` returns `noop` (no agent invocation). | ETA follow-up agent behavior is exercised by `create_timer` in 3f but timer-fired re-entry is not yet implemented. |
 | Task branch | `kind=task` only sets `active_task`. | Task submission activates the workflow but does not yet trigger a separate agent decision. |
 | SQS timer cap | Timer scheduling uses delayed SQS messages. | SQS delay tops out at 900 seconds; production should use EventBridge for longer delays. |
 | Graph per message | `process_work_message` builds the compiled graph for each message. | This keeps the take-home simple and is acceptable at this scale. |

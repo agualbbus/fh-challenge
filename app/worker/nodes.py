@@ -63,6 +63,7 @@ async def event_node(state: LoadGraphState) -> dict[str, Any]:
     event = state.get("payload") or {}
     load_state = state.get("load_state") or init_load_state(state.get("load_id", ""), {})
     active_timers = dict(state.get("active_timers") or {})
+    session = dict(state.get("session") or {})
 
     # Guard against events arriving before the load has been seeded. Without
     # this, build_system_prompt raises ValueError and the message bounces
@@ -84,9 +85,32 @@ async def event_node(state: LoadGraphState) -> dict[str, Any]:
             "messages": decision.messages,
         }
 
+    # Deterministic tracking branch — no LLM. Counts consecutive in-geofence
+    # pings and transitions to at_delivery on the third.
+    if event.get("event_type") == "tracking":
+        from app.worker.tracking import handle_tracking_ping
+
+        load_delta, session_delta, tool_records = handle_tracking_ping(load_state, event, session)
+        update: dict[str, Any] = {
+            "session": {**session, **session_delta},
+            "tool_calls": [r.to_dict() for r in tool_records],
+        }
+        if load_delta:
+            update["load_state"] = merge_load_data(load_state, load_delta)
+            update["active_timers"] = {}
+        return update
+
+    # Attachment-driven SOP switch: a POD or other attachment arriving while
+    # the load is still on the ETA SOP means the driver has implicitly arrived.
+    # Switch to confirm_delivery so check_attachment is available to the agent.
+    if event.get("event_type") == "inbound_communication":
+        attachments = (event.get("inbound_communication") or {}).get("attachments", [])
+        if attachments and load_state.get("active_task") == "delivery_eta_checkpoint":
+            load_state = merge_load_data(load_state, {"active_task": "confirm_delivery"})
+
     result = await _invoke_agent(load_state, active_timers, event)
 
-    update: dict[str, Any] = {
+    update = {
         "load_state": merge_load_data(load_state, result["state_delta"]),
         "tool_calls": result["tool_calls"],
         "messages": result["messages"],

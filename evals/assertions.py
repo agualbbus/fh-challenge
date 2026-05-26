@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -24,8 +25,6 @@ def assert_tool_called(
         raise AssertionError(f"Required tool not called: {tool}")
 
     if contains is not None:
-        # Case-insensitive so SOP-driven wording ("Checking on...") still matches
-        # fixture substrings like "checking".
         haystack = str(matches).lower()
         if contains.lower() not in haystack:
             raise AssertionError(f"Tool {tool} calls did not contain {contains!r}: {matches}")
@@ -46,11 +45,19 @@ def assert_state(milestone: str | None, expected_state: str) -> None:
         raise AssertionError(f"Expected milestone {expected_state!r}, got {milestone!r}")
 
 
-def run_case_assertions(
+@dataclass
+class CaseResult:
+    required_results: list[bool] = field(default_factory=list)
+    forbidden_results: list[bool] = field(default_factory=list)
+    milestone_ok: bool | None = None
+    errors: list[str] = field(default_factory=list)
+
+
+def evaluate_case(
     workflow_state: dict[str, Any],
     expected: dict[str, Any],
-) -> list[str]:
-    errors: list[str] = []
+) -> CaseResult:
+    result = CaseResult()
     tool_calls = workflow_state.get("tool_calls", [])
     milestone = workflow_state.get("milestone") or workflow_state.get("load_state", {}).get(
         "milestone"
@@ -64,19 +71,32 @@ def run_case_assertions(
                 contains=req.get("contains"),
                 arguments=req.get("arguments"),
             )
+            result.required_results.append(True)
         except AssertionError as exc:
-            errors.append(str(exc))
+            result.required_results.append(False)
+            result.errors.append(str(exc))
 
     for forbidden in expected.get("forbidden_tool_calls", []):
         try:
             assert_tool_forbidden(tool_calls, forbidden)
+            result.forbidden_results.append(True)
         except AssertionError as exc:
-            errors.append(str(exc))
+            result.forbidden_results.append(False)
+            result.errors.append(str(exc))
 
     if expected.get("expected_state"):
         try:
             assert_state(milestone, expected["expected_state"])
+            result.milestone_ok = True
         except AssertionError as exc:
-            errors.append(str(exc))
+            result.milestone_ok = False
+            result.errors.append(str(exc))
 
-    return errors
+    return result
+
+
+def run_case_assertions(
+    workflow_state: dict[str, Any],
+    expected: dict[str, Any],
+) -> list[str]:
+    return evaluate_case(workflow_state, expected).errors

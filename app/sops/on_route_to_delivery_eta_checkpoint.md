@@ -53,9 +53,10 @@ Examples:
 
 Expected behavior:
 
-1. Treat the load as at delivery.
-2. Stop ETA follow-up pressure for the on-route workflow.
-3. Begin confirm delivery handling.
+1. Call `update_load_state(target_state="at_delivery")` to mark the load as arrived.
+2. Call `cancel_timers()` to stop all ETA follow-up pressure.
+3. Reply to the driver on the same inbound channel using the customer's `first_arrival_message` (the message contains instructions about POD — do not invent different wording).
+4. Do not create issues or tasks unless the driver reports a separate problem alongside the arrival.
 
 ## Driver Provides ETA
 
@@ -70,8 +71,8 @@ Examples:
 Expected behavior:
 
 1. Interpret the ETA using the delivery stop timezone.
-2. Check whether the ETA is plausible for the delivery stop and appointment.
-3. If the ETA is usable, record it, acknowledge the update on the same channel, and continue follow-up according to the customer's ETA timer.
+2. Call `validate_eta` to confirm it is plausible for the delivery appointment.
+3. If the ETA is usable: call `update_eta(target_location="delivery", eta_utc=<iso>)`, then acknowledge the driver on the same channel with a short message that includes the word **updated** (e.g. "Got it — ETA updated"), then call `create_timer(timer_type="eta_followup", fire_at_utc=<now + eta_followup_minutes>)` to schedule the next follow-up check.
 4. If the ETA is ambiguous, ask one short clarification question when the driver can reasonably answer it.
 5. If the ETA indicates a meaningful service risk, treat it as a delivery delay and make it visible to the operations team according to the customer workflow.
 

@@ -22,10 +22,10 @@ flake.
 
 | File | Role |
 | --- | --- |
-| [`run_evals.py`](run_evals.py) | Harness entrypoint: seeds loads via `POST /loads`, posts each event, polls the checkpoint, runs assertions, writes `EVAL_REPORT.md`. |
-| [`assertions.py`](assertions.py) | Pure assertion helpers: `assert_tool_called`, `assert_tool_forbidden`, `assert_state`, and the aggregator `run_case_assertions`. |
+| [`run_evals.py`](run_evals.py) | Harness entrypoint: seeds loads via `POST /loads`, posts each event, polls the checkpoint, runs assertions, writes a new timestamped report under `reports/`. |
+| [`assertions.py`](assertions.py) | Pure assertion helpers: `assert_tool_called`, `assert_tool_forbidden`, `assert_state`, and the structured aggregator `evaluate_case`. |
 | [`fixtures/test-cases.json`](fixtures/test-cases.json) | Visible challenge scenarios. Each case has `customer_id`, `initial_state`, optional `load_data_patch`, `events`, and `expected` (`required_tool_calls`, `forbidden_tool_calls`, `expected_state`). |
-| [`EVAL_REPORT.md`](EVAL_REPORT.md) | Auto-generated PASS/FAIL table; rewritten on every run by `_write_report`. |
+| [`reports/`](reports/) | Auto-generated `<UTC-timestamp>_EVAL_REPORT.md` files — one per run, latest sorts to the top. Includes a per-case score and an overall score that ignores extra tool calls. |
 
 Runtime dependencies:
 
@@ -84,7 +84,7 @@ sequenceDiagram
         Harness->>PG: query_load_state(load_id)
     end
     Harness->>Asserts: run_case_assertions(state, expected)
-    Harness->>Harness: write EVAL_REPORT.md
+    Harness->>Harness: write reports/<timestamp>_EVAL_REPORT.md
 ```
 
 The harness never talks to the worker directly — it only writes through the
@@ -104,7 +104,7 @@ flowchart TD
     read --> required["required_tool_calls<br/>tool / contains / arguments"]
     read --> forbidden["forbidden_tool_calls"]
     read --> state["expected_state vs milestone"]
-    required --> report["row in EVAL_REPORT.md"]
+    required --> report["row in reports/<timestamp>_EVAL_REPORT.md"]
     forbidden --> report
     state --> report
 ```
@@ -150,7 +150,18 @@ seed message landed and falsely fail the `expected_state` assertion.
 | `assert_tool_called(tool, contains?, arguments?)` | Fails if no `tool_calls` entry has the matching tool, or substring/argument subset don't match. |
 | `assert_tool_forbidden(tool)` | Fails if any entry uses the forbidden tool. |
 | `assert_state(milestone, expected)` | Direct equality on milestone. |
-| `run_case_assertions` | Runs all three, collects messages, returns the list of errors (empty list = PASS). |
+| `evaluate_case` | Runs all three, returns a `CaseResult` with per-check booleans plus the error list. `run_case_assertions` is a thin wrapper that returns just the errors (empty list = PASS). |
+
+## Scoring
+
+Per case: `score = (required_matched + forbidden_avoided + milestone_ok) / total_checks`, where `total_checks = len(required) + len(forbidden) + (1 if expected_state else 0)`. Extra tool calls that aren't in either list are ignored, so adding helpful but non-required tools never penalizes (or inflates) the score. The summary line in each report aggregates `checks_passed/checks_total` across all cases.
+
+The Results table columns:
+
+- **Required (matched/total)** — required tools satisfied vs declared.
+- **Forbidden called** — count of forbidden tools that actually fired (`0` is good).
+- **Milestone** — PASS/FAIL against `expected_state`.
+- **Score** — equal-weight percentage of all checks for that case.
 
 ## Gotchas
 
@@ -170,5 +181,5 @@ seed message landed and falsely fail the `expected_state` assertion.
   [`../app/worker/agent.py`](../app/worker/agent.py), any new tools in
   [`../app/tools/tools.py`](../app/tools/tools.py)) before promoting the ID
   into `MOCK_CASES`.
-- **`EVAL_REPORT.md` is generated.** Don't hand-edit; it is rewritten on every
-  run.
+- **Reports are generated, never hand-edited.** Every run writes a new file
+  under `reports/` named with a UTC timestamp so the latest sorts to the top.
