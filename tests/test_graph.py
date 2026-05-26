@@ -96,3 +96,48 @@ async def test_graph_processes_inbound_event(monkeypatch: pytest.MonkeyPatch) ->
     state = await query_load_state(checkpointer, load_id)
     tools = [tc["tool"] for tc in state["tool_calls"]]
     assert "send_sms" in tools
+
+
+@pytest.mark.asyncio
+async def test_graph_tracking_three_pings_transitions_to_at_delivery() -> None:
+    checkpointer = MemorySaver()
+    graph = build_graph(checkpointer)
+    load_id = "graph-test-3h"
+    seed = {
+        "customer_id": "customer_b",
+        "milestone": "on_route_to_delivery",
+        "load_data": {
+            "external_load_id": "FH-2",
+            "companies": {
+                "broker": {"name": "B"},
+                "shipper": {"name": "S"},
+                "carrier": {"name": "C"},
+            },
+            "stops": [],
+        },
+    }
+    await graph.ainvoke(invoke_input(load_id, "seed", seed), graph_config(load_id))
+
+    for i in range(1, 4):
+        ping = {
+            "event_id": f"trk-{i}",
+            "event_type": "tracking",
+            "load_id": load_id,
+            "customer_id": "customer_b",
+            "occurred_at": f"2026-05-11T17:3{i}:00Z",
+            "tracking": {
+                "tracking_id": f"trk-{i}",
+                "lat": 32.777,
+                "lng": -96.797,
+                "distance_to_delivery_miles": 0.2,
+                "ping_sequence": i,
+                "provider": "mock",
+            },
+        }
+        await graph.ainvoke(invoke_input(load_id, "event", ping), graph_config(load_id))
+
+    state = await query_load_state(checkpointer, load_id)
+    assert state["milestone"] == "at_delivery"
+    tools = [tc["tool"] for tc in state["tool_calls"]]
+    assert "update_load_state" in tools
+    assert "cancel_timers" in tools

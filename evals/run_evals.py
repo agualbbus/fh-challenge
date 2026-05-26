@@ -25,6 +25,10 @@ MOCK_CASES = {
     "3b_load_question_found",
     "3c_load_question_missing",
     "3d_truck_broken",
+    "3f_driver_provides_eta",
+    "3h_fresh_tracking_three_pings_in_geofence",
+    "3i_not_tracking_driver_says_arrived",
+    "3j_not_tracking_driver_sends_pod",
     "3k_broker_email_ignore",
 }
 
