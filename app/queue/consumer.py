@@ -53,9 +53,7 @@ async def _handle_one(
             exc,
             raw.get("Body", "")[:500],
         )
-        await asyncio.to_thread(
-            client.delete_message, QueueUrl=queue_url, ReceiptHandle=receipt
-        )
+        await asyncio.to_thread(client.delete_message, QueueUrl=queue_url, ReceiptHandle=receipt)
         return
 
     async with semaphore:
@@ -70,9 +68,7 @@ async def _handle_one(
             )
             return
 
-        await asyncio.to_thread(
-            client.delete_message, QueueUrl=queue_url, ReceiptHandle=receipt
-        )
+        await asyncio.to_thread(client.delete_message, QueueUrl=queue_url, ReceiptHandle=receipt)
 
 
 async def run_consumer(handler: MessageHandler) -> None:
