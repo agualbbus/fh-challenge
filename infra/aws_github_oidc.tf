@@ -60,6 +60,14 @@ data "aws_iam_policy_document" "github_deploy" {
 
   statement {
     actions = [
+      "ecs:DescribeTaskDefinition",
+      "ecs:RegisterTaskDefinition",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    actions = [
       "ecs:UpdateService",
       "ecs:DescribeServices",
     ]
@@ -67,6 +75,19 @@ data "aws_iam_policy_document" "github_deploy" {
       aws_ecs_service.api[0].arn,
       aws_ecs_service.worker[0].arn,
     ]
+  }
+
+  statement {
+    actions = ["iam:PassRole"]
+    resources = [
+      aws_iam_role.ecs_execution[0].arn,
+      aws_iam_role.ecs_task[0].arn,
+    ]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["ecs-tasks.amazonaws.com"]
+    }
   }
 }
 

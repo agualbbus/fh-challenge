@@ -156,4 +156,4 @@ resource "aws_lb_listener" "api" {
 }
 
 # ECS services and task definitions: see aws_ecs_services.tf.
-# Deploys: GitHub Actions OIDC → ECR → force-new-deployment (see aws_github_oidc.tf).
+# Deploys: GitHub Actions OIDC -> ECR -> new task definition revision (see aws_github_oidc.tf).
