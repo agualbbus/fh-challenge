@@ -55,8 +55,7 @@ jobs:
             docker push $IMAGE:latest
           fi
 
-      - name: Register new ECS task definition revisions
-        id: task-defs
+      - name: Deploy ECS services
         if: env.DEPLOY_ECS == 'true'
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
@@ -65,11 +64,19 @@ jobs:
           set -euo pipefail
 
           IMAGE=$REGISTRY/$ECR_REPO:$SHA
+          API_SERVICE=freight-watchtower-api
+          WORKER_SERVICE=freight-watchtower-worker
+
+          force_deploy() {
+            aws ecs update-service --cluster "$ECS_CLUSTER" \
+              --service "$API_SERVICE" --force-new-deployment >/dev/null
+            aws ecs update-service --cluster "$ECS_CLUSTER" \
+              --service "$WORKER_SERVICE" --force-new-deployment >/dev/null
+          }
 
           register_revision() {
             local service=$1
             local container=$2
-            local output_name=$3
             local current_task_definition
 
             current_task_definition=$(aws ecs describe-services \
@@ -96,27 +103,31 @@ jobs:
                 )
             ' task-definition.json > new-task-definition.json
 
-            local task_definition_arn
-            task_definition_arn=$(aws ecs register-task-definition \
+            aws ecs register-task-definition \
               --cli-input-json file://new-task-definition.json \
               --query 'taskDefinition.taskDefinitionArn' \
-              --output text)
-
-            echo "$output_name=$task_definition_arn" >> "$GITHUB_OUTPUT"
+              --output text
           }
 
-          register_revision freight-watchtower-api api api_task_definition_arn
-          register_revision freight-watchtower-worker worker worker_task_definition_arn
+          # Preflight IAM: revisioned deploy needs Describe/RegisterTaskDefinition + PassRole.
+          if ! aws ecs describe-task-definition \
+            --task-definition "$API_SERVICE" \
+            --query taskDefinition.taskDefinitionArn \
+            --output text >/dev/null 2>&1; then
+            echo "::warning::GitHub deploy role is missing ECS task-definition permissions."
+            echo "Run once: cd infra && terraform apply -target=aws_iam_role_policy.github_deploy"
+            echo "Falling back to force-new-deployment (uses :latest image; task definition revision unchanged)."
+            force_deploy
+            exit 0
+          fi
 
-      - name: Update ECS services
-        if: env.DEPLOY_ECS == 'true'
-        run: |
-          aws ecs update-service --cluster $ECS_CLUSTER \
-            --service freight-watchtower-api \
-            --task-definition "${{ steps.task-defs.outputs.api_task_definition_arn }}" >/dev/null
-          aws ecs update-service --cluster $ECS_CLUSTER \
-            --service freight-watchtower-worker \
-            --task-definition "${{ steps.task-defs.outputs.worker_task_definition_arn }}" >/dev/null
+          API_TASK_DEF=$(register_revision "$API_SERVICE" api)
+          WORKER_TASK_DEF=$(register_revision "$WORKER_SERVICE" worker)
+
+          aws ecs update-service --cluster "$ECS_CLUSTER" \
+            --service "$API_SERVICE" --task-definition "$API_TASK_DEF" >/dev/null
+          aws ecs update-service --cluster "$ECS_CLUSTER" \
+            --service "$WORKER_SERVICE" --task-definition "$WORKER_TASK_DEF" >/dev/null
 
       - name: Wait for services to stabilize
         if: env.DEPLOY_ECS == 'true'

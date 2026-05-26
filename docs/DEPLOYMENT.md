@@ -31,6 +31,15 @@ Or run the full stack: `docker compose up --build` (ensure `.dockerignore` exclu
 
 **One-time setup:** after `terraform apply`, set GitHub secret `AWS_DEPLOY_ROLE_ARN` from `terraform output -raw github_deploy_role_arn`. OIDC trust allows `github-ecs-setup` and `main` (see `var.github_deploy_branches`).
 
+**After updating the deploy workflow or `infra/aws_github_oidc.tf`:** apply the GitHub deploy IAM policy so Actions can register ECS task definitions:
+
+```bash
+cd infra
+terraform apply -target=aws_iam_role_policy.github_deploy
+```
+
+Without this, deploy falls back to `force-new-deployment` (rolls tasks using `:latest` but does not increment task definition revision).
+
 **Test branch (`github-ecs-setup`)** — push builds and pushes `freight-watchtower:<sha>` only (validates OIDC + ECR; does not update `:latest` or roll ECS).
 
 **Full deploy** — either push to `main`, or run **deploy** manually on `github-ecs-setup` with `deploy_ecs=true` (pushes `:latest`, registers new task definition revisions with the commit SHA image, and rolls both services).
